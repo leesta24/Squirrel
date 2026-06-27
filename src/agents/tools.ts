@@ -52,6 +52,52 @@ function textResult<T>(details: T, terminate = false): AgentToolResult<T> {
   };
 }
 
+function clamp01(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function embeddedParam(summary: string, name: string): unknown {
+  const match = summary.match(new RegExp(`<parameter\\s+name=["']${name}["']>([\\s\\S]*?)</parameter>`, "i"));
+  if (!match?.[1]) return undefined;
+  const raw = match[1].trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function cleanSummary(summary: string): string {
+  return summary.replace(/<\/parameter>[\s\S]*$/i, "").trim();
+}
+
+function normalizeReport(params: unknown): ReportSubmission {
+  const raw = params as Partial<ReportSubmission>;
+  const summaryText = typeof raw.summary === "string" ? raw.summary : "";
+  const summary = cleanSummary(summaryText) || "Report submitted.";
+  return {
+    summary,
+    keySignals: asStringArray(raw.keySignals).length
+      ? asStringArray(raw.keySignals)
+      : asStringArray(embeddedParam(summaryText, "keySignals")),
+    risks: asStringArray(raw.risks).length
+      ? asStringArray(raw.risks)
+      : asStringArray(embeddedParam(summaryText, "risks")),
+    confidence: clamp01(raw.confidence ?? embeddedParam(summaryText, "confidence"), 0.5),
+    dataGaps: asStringArray(raw.dataGaps).length
+      ? asStringArray(raw.dataGaps)
+      : asStringArray(embeddedParam(summaryText, "dataGaps")),
+  };
+}
+
 function now() {
   return new Date().toISOString();
 }
@@ -254,13 +300,13 @@ export function createPredictionMarketTools(ctx: PredictionToolContext): AgentTo
     description: "Submit this agent's structured analysis report and finish the current node.",
     parameters: Type.Object({
       summary: Type.String({ description: "Concise report summary" }),
-      keySignals: Type.Array(Type.String(), { description: "Key evidence or signals" }),
-      risks: Type.Array(Type.String(), { description: "Important risks or caveats" }),
-      confidence: Type.Number({ description: "Confidence from 0 to 1", minimum: 0, maximum: 1 }),
-      dataGaps: Type.Array(Type.String(), { description: "Missing or partial data that limits confidence" }),
+      keySignals: Type.Optional(Type.Array(Type.String(), { description: "Key evidence or signals" })),
+      risks: Type.Optional(Type.Array(Type.String(), { description: "Important risks or caveats" })),
+      confidence: Type.Optional(Type.Number({ description: "Confidence from 0 to 1", minimum: 0, maximum: 1 })),
+      dataGaps: Type.Optional(Type.Array(Type.String(), { description: "Missing or partial data that limits confidence" })),
     }),
     async execute(_toolCallId, params) {
-      const report = params as ReportSubmission;
+      const report = normalizeReport(params);
       ctx.onReport?.(roleId, report);
       return textResult({ roleId, report }, true);
     },

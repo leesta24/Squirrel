@@ -1,23 +1,25 @@
 // CLI entry point. Three acceptance commands (see PLAN §11):
 //   screen                      — data + analysis layer: candidates / cross-platform spreads / probability swings
-//   analyze --market <q> [--faux] — agent decision layer, runs the full pipeline on a single market
+//   analyze --market <q> [--mock] — agent decision layer, runs the full pipeline on a single market
 //   analyze --market <q> --v2     — Pi Agent runtime path with role-specific tool calls
-//   backtest [--faux]           — backtest + Brier score
+//   analyze --v2 --demo-market    — real Pi Agent loop over local demo data
+//   backtest [--mock]           — backtest + Brier score
 //
-// --faux: use a mock LLM (no ANTHROPIC_API_KEY needed) to validate the orchestration logic.
+// --mock: use a mock LLM (no model key needed) to validate the legacy orchestration logic.
 
 import { fetchAllEvents } from "./data/index.js";
 import { screen as runScreen } from "./analysis/screener.js";
 import { findArbitrage } from "./analysis/arbitrage.js";
 import { topMovers } from "./analysis/tracker.js";
-import { createLLM, createFauxLLM, type LLM } from "./agents/llm.js";
-import { demoResponder } from "./agents/fauxDemo.js";
+import { createLLM, createMockLLM, type LLM } from "./agents/llm.js";
+import { demoResponder } from "./agents/mockDemo.js";
 import { analyze } from "./agents/orchestrate.js";
 import { analyzeV2 } from "./agents/orchestrateV2.js";
 import { backtest, FIXTURES } from "./backtest.js";
 import { fetchOOSCases, runOOS } from "./oos.js";
 import { yesProbability } from "./data/types.js";
 import type { Verdict } from "./agents/types.js";
+import { DEMO_MARKETS, pickDemoMarket } from "./demoMarkets.js";
 import { existsSync } from "node:fs";
 
 // Load .env.local (AI_GATEWAY_API_KEY, etc.) if present; harmless when absent.
@@ -27,8 +29,10 @@ const argv = process.argv.slice(2);
 const hasFlag = (name: string) => argv.includes(`--${name}`);
 const getOpt = (name: string): string | undefined => {
   const i = argv.indexOf(`--${name}`);
-  return i >= 0 ? argv[i + 1] : undefined;
+  const value = i >= 0 ? argv[i + 1] : undefined;
+  return value && !value.startsWith("--") ? value : undefined;
 };
+const mockMode = () => hasFlag("mock") || hasFlag("faux"); // --faux kept as a backward-compatible alias.
 
 function fmtNum(n: number | undefined): string {
   if (n === undefined) return "—";
@@ -115,14 +119,14 @@ function assertRealLLMConfigured(): void {
   if (!process.env.AI_GATEWAY_API_KEY && !process.env.ANTHROPIC_API_KEY) {
     console.error(
       "Set AI_GATEWAY_API_KEY (Vercel AI Gateway) or ANTHROPIC_API_KEY for real runs; " +
-        "or pass --faux to validate the pipeline with a mock LLM.",
+        "or pass --mock to validate the legacy pipeline with a mock LLM.",
     );
     process.exit(1);
   }
 }
 
-function pickLLM(faux: boolean): LLM {
-  if (faux) return createFauxLLM(demoResponder);
+function pickLLM(mock: boolean): LLM {
+  if (mock) return createMockLLM(demoResponder);
   assertRealLLMConfigured();
   return createLLM();
 }
@@ -142,24 +146,33 @@ function printVerdict(v: Verdict | undefined): void {
 }
 
 async function runAnalyze(): Promise<void> {
-  const faux = hasFlag("faux");
+  const mock = mockMode();
   const v2 = hasFlag("v2");
+  const useDemoMarket = hasFlag("demo-market");
   const query = getOpt("market");
-  if (v2 && faux) {
-    console.error("--v2 uses the real Pi Agent runtime and does not support --faux yet.");
+  const demoQuery = getOpt("demo-market") ?? query;
+  if (v2 && mock) {
+    console.error("--v2 uses the real Pi Agent runtime and does not support --mock.");
     process.exit(1);
   }
-  const llm = v2 ? undefined : pickLLM(faux);
+  const llm = v2 ? undefined : pickLLM(mock);
   if (v2) assertRealLLMConfigured();
 
-  console.log("Fetching markets…");
-  const { data: events } = await fetchAllEvents(100);
-  const markets = events.flatMap((e) => e.markets);
-  let market = query
-    ? markets.find(
-        (m) => m.id === query || m.question.toLowerCase().includes(query.toLowerCase()),
-      )
-    : runScreen(events, { limit: 1 })[0]?.market;
+  let markets = DEMO_MARKETS;
+  let market = useDemoMarket ? pickDemoMarket(demoQuery) : undefined;
+
+  if (!useDemoMarket) {
+    console.log("Fetching markets…");
+    const { data: events } = await fetchAllEvents(100);
+    markets = events.flatMap((e) => e.markets);
+    market = query
+      ? markets.find(
+          (m) => m.id === query || m.question.toLowerCase().includes(query.toLowerCase()),
+        )
+      : runScreen(events, { limit: 1 })[0]?.market;
+  } else {
+    console.log("Using local demo market data…");
+  }
 
   if (!market) {
     console.error(query ? `Market not found: ${query}` : "No candidate markets");
@@ -168,8 +181,9 @@ async function runAnalyze(): Promise<void> {
 
   console.log(`\nMarket: "${market.question}"`);
   console.log(`Market-implied YES = ${pct(yesProbability(market) ?? 0.5)}  [${market.source}]`);
-  if (faux) console.log("(faux mode: mock LLM, validates orchestration logic only)");
+  if (mock) console.log("(mock mode: mock LLM, validates orchestration logic only)");
   if (v2) console.log("(v2 mode: Pi Agent runtime, toolcall loops, role-specific toolsets)");
+  if (useDemoMarket) console.log("(demo market: local snapshot, no live exchange fetch)");
   console.log("");
 
   const state = v2 ? await analyzeV2(market, {
@@ -190,9 +204,9 @@ async function runAnalyze(): Promise<void> {
 // ───────────────────────── backtest ─────────────────────────
 
 async function runBacktest(): Promise<void> {
-  const faux = hasFlag("faux");
-  const llm = pickLLM(faux);
-  if (faux) console.log("(faux mode: mock LLM)\n");
+  const mock = mockMode();
+  const llm = pickLLM(mock);
+  if (mock) console.log("(mock mode: mock LLM)\n");
 
   console.log(`Backtesting ${FIXTURES.length} settled events…\n`);
   const sum = await backtest(llm, FIXTURES, (c, pHat) =>
@@ -236,7 +250,7 @@ async function runOos(): Promise<void> {
     return;
   }
 
-  const llm = pickLLM(hasFlag("faux"));
+  const llm = pickLLM(mockMode());
   console.log("\nRunning the agent on each…\n");
   const sum = await runOOS(llm, cases, (c, pHat) =>
     console.log(`  ✓ ${pad(c.question, 46)} → p_hat ${(pHat * 100).toFixed(0)}%`),
@@ -277,7 +291,7 @@ async function main(): Promise<void> {
       await runOos();
       break;
     default:
-      console.log("Usage: npm run <screen | analyze -- --market <q> [--faux|--v2] | backtest [--faux] | oos [--dry|--faux]>");
+      console.log("Usage: npm run <screen | analyze -- --market <q> [--mock|--v2|--demo-market] | backtest [--mock] | oos [--dry|--mock]>");
       process.exit(1);
   }
 }

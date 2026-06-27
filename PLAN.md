@@ -266,15 +266,19 @@ Kalshi：
 
 ### 5.5 Role -> toolset
 
+当前 v2 active toolset 先只打开确定可用、无额外交易所网络依赖的工具；source/search/orderbook/history tools 保留实现和计划，但不分配给 v2 agent，等 live API 连通性稳定后再打开。
+
 | Role | Toolset |
 |---|---|
-| Market Analyst | `polymarket_search_markets`, `kalshi_search_markets`, `get_verified_market_snapshot`, `submit_report` |
-| Microstructure Analyst | `polymarket_get_orderbook`, `kalshi_get_orderbook`, `get_probability_history`, `get_probability_indicators`, `submit_report` |
-| Cross-market / Resolution Analyst | `get_related_markets`, `polymarket_get_market`, `kalshi_get_market`, `get_cross_platform_anomaly_signals`, `submit_report` |
+| Market Analyst | `get_verified_market_snapshot`, `get_probability_indicators`, `submit_report` |
+| Microstructure Analyst | `get_probability_indicators`, `get_verified_market_snapshot`, `submit_report` |
+| Cross-market / Resolution Analyst | `get_cross_platform_anomaly_signals`, `get_verified_market_snapshot`, `submit_report` |
 | YES Researcher | analyst reports + debate transcript + optional `get_verified_market_snapshot`, `get_probability_indicators`, `submit_report` |
 | NO Researcher | analyst reports + debate transcript + optional `get_verified_market_snapshot`, `get_probability_indicators`, `submit_report` |
 | Debate Judge | analyst reports + full debate transcript + `submit_judgement` |
 | Decision Manager | analyst reports + debate transcript + judge decision + `get_verified_market_snapshot`, `get_probability_indicators`, `submit_verdict` |
+
+Planned but temporarily inactive in v2: `polymarket_search_markets`, `kalshi_search_markets`, `polymarket_get_orderbook`, `kalshi_get_orderbook`, `polymarket_get_market`, `kalshi_get_market`, `polymarket_get_price_history`, `get_probability_history`, `get_related_markets`.
 
 ---
 
@@ -395,7 +399,7 @@ interface Outcome {
 | 2. Pi Agent node | 新增 `runPiAgentNode(role, tools, state)`，使用 `@earendil-works/pi-agent-core.Agent` | 事件流出现 `tool_execution_start/end`，报告通过 `submit_report` 进入 state |
 | 3. Graph runner | 新增轻量 node/edge/conditional runner | analyst -> debate -> decision 路径不靠手写 for-loop 主导 |
 | 4. README/PLAN 更新 | 文档改成 TradingAgents-lite on Pi，明确 known gaps | reviewer 能看出选择 Pi 的理由和边界 |
-| 5. 示例输出 | 重新捕获 `screen`、`analyze --faux`、真实 `analyze` 输出 | 示例中展示真实 tool calls 和结构化 verdict |
+| 5. 示例输出 | 重新捕获 `screen`、`analyze --mock`、真实 `analyze --v2 --demo-market` 输出 | 示例中展示真实 tool calls 和结构化 verdict |
 
 ---
 
@@ -415,7 +419,7 @@ interface Outcome {
 
 ### Agent layer
 
-- 用 faux/mock 模型验证 graph 不死循环、conditional edge 正确。
+- 用 mock 模型验证 legacy graph 不死循环、conditional edge 正确。
 - 用真实模型验证至少一次完整 toolcall loop。
 - 最终 verdict 必须来自 `submit_verdict` tool 参数，而不是自由文本解析。
 
@@ -444,9 +448,10 @@ interface Outcome {
 
 ```bash
 npm run screen
-npm run analyze -- --market "<query>" --faux
+npm run analyze -- --v2 --demo-market
+npm run analyze -- --market "<query>" --mock
 npm run analyze -- --market "<query>"
-npm run backtest --faux
+npm run backtest -- --mock
 ```
 
 通过判据：

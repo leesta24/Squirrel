@@ -3,7 +3,7 @@
 //
 //   1. Vercel AI Gateway (AI_GATEWAY_API_KEY)  — one key for many providers, cost tracking, failover
 //   2. Direct Anthropic   (ANTHROPIC_API_KEY)  — fallback when no gateway key
-//   3. Faux mock          (createFauxLLM)      — no key, validates orchestration logic
+//   3. Mock               (createMockLLM)      — no key, validates orchestration logic
 //
 // Both real backends speak the Anthropic Messages protocol (the gateway exposes it too), so
 // structured output uses the same toolChoice {type:"tool",name} and both read their key from env.
@@ -32,7 +32,7 @@ const MODELS = {
 };
 
 export interface LLM {
-  faux: boolean;
+  mock: boolean;
   /** free-form reasoning */
   text(tier: Tier, systemPrompt: string, userPrompt: string): Promise<string>;
   /** structured output: forces the model to return tool.parameters' schema */
@@ -54,7 +54,7 @@ type Backend = () => { models: ReturnType<typeof createModels>; pick: (tier: Tie
 
 function makeLLM(backend: Backend): LLM {
   return {
-    faux: false,
+    mock: false,
     async text(tier, systemPrompt, userPrompt) {
       const { models, pick } = backend();
       const res = await models.completeSimple(
@@ -139,7 +139,7 @@ export function createLLM(): LLM {
 }
 
 /** responder returns preset text (text) or object (structured) per request */
-export type FauxResponder = (req: {
+export type MockResponder = (req: {
   tier: Tier;
   systemPrompt: string;
   userPrompt: string;
@@ -148,13 +148,13 @@ export type FauxResponder = (req: {
 
 /**
  * Mock impl (no API key) for validating orchestration logic. Short-circuits the responder
- * directly instead of going through Pi's fauxProvider — the latter is a shared queue and
+ * directly instead of going through Pi's mock provider — the latter is a shared queue and
  * parallel analyst calls (Promise.all) would clobber each other. Pi integration is exercised
  * by the real backends.
  */
-export function createFauxLLM(responder: FauxResponder): LLM {
+export function createMockLLM(responder: MockResponder): LLM {
   return {
-    faux: true,
+    mock: true,
     async text(tier, systemPrompt, userPrompt) {
       const out = responder({ tier, systemPrompt, userPrompt, structured: false });
       return typeof out === "string" ? out : JSON.stringify(out);

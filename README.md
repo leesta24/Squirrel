@@ -126,8 +126,8 @@ cp .env.example .env.local
 
 The gateway is the default backend (verified end-to-end with `anthropic/claude-opus-4.8` +
 `anthropic/claude-haiku-4.5`). Without any key you can still run the data/analysis layer (`screen`)
-and validate the agent pipeline with `--faux` (a mock LLM that exercises the full orchestration
-without API calls).
+and validate the legacy agent pipeline with `--mock` (a mock LLM that exercises orchestration
+without model calls).
 
 > **Local dev note:** if you sit behind an HTTP proxy, Node's native `fetch` ignores proxy env vars by
 > default. Prefix commands with `NODE_USE_ENV_PROXY=1`.
@@ -149,8 +149,9 @@ cross-platform spread signals, and 24h probability movers. No API key needed.
 
 ```bash
 npm run analyze -- --market "fed" --v2     # real Pi Agent graph (needs a key in .env.local)
+npm run analyze -- --v2 --demo-market      # real Pi Agent graph over local demo data
 npm run analyze -- --market "fed"          # legacy structured-output pipeline
-npm run analyze -- --market "fed" --faux   # legacy mock LLM, validates orchestration without API calls
+npm run analyze -- --market "fed" --mock   # legacy mock LLM, validates orchestration without model calls
 ```
 
 `--market` matches a market id or a substring of the question; omit it to pick the top screened
@@ -158,14 +159,20 @@ candidate. Streams each role's output, then prints a structured verdict:
 `side · p_hat · market_p · edge · kelly_fraction · recommendation · reasoning`.
 
 `--v2` is the intended architecture path: each role is a real Pi `Agent` with a role-specific toolset,
-and the graph runs analysts → two YES/NO debate rounds → debate judge → decision manager. `--faux`
-does not exercise the Pi Agent toolcall loop and is therefore kept on the legacy path only.
+and the graph runs analysts → two YES/NO debate rounds → debate judge → decision manager. `--demo-market`
+uses a local market snapshot so the real Pi Agent loop can be exercised even when live exchange APIs are
+unreachable. `--mock` does not exercise the Pi Agent toolcall loop and is therefore kept on the legacy path only.
+
+Current v2 active tools are intentionally limited to tools that work without extra live exchange calls:
+`get_verified_market_snapshot`, `get_probability_indicators`, `get_cross_platform_anomaly_signals`,
+`submit_report`, `submit_judgement`, and `submit_verdict`. Network tools such as market search and
+orderbook fetch are implemented but not assigned to v2 agents until the data-source connectivity is reliable.
 
 ### `backtest` — agent validation
 
 ```bash
 npm run backtest           # real Claude run
-npm run backtest --faux    # mock LLM
+npm run backtest -- --mock # mock LLM
 ```
 
 Runs the pipeline over already-settled events (feeding only pre-settlement prices), then reports
@@ -181,7 +188,8 @@ See [`examples/`](examples/) for captured outputs.
 |---|---|
 | `npm run screen` | Real market names (not mock), all `probability∈[0,1]`, spread signals appear |
 | `npm run analyze -- --market <q> --v2` | Pi Agent graph runs, tools are called, debate ends after configured rounds, judge and verdict pass schemas |
-| `npm run analyze -- --market <q> --faux` | Legacy mock path runs without a model key |
+| `npm run analyze -- --v2 --demo-market` | Real Pi Agent graph runs without live exchange fetch |
+| `npm run analyze -- --market <q> --mock` | Legacy mock path runs without a model key |
 | `npm run backtest` | Brier score computes, direction is non-random (not required to beat the market) |
 
 `tsc --noEmit` typechecks the whole project (`strict` + `noUncheckedIndexedAccess`).
@@ -226,7 +234,7 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
   high similarity does not guarantee the two outcomes are defined the same way (one may ask "X happens",
   the other "X first"). Large spreads are often apples-to-oranges, not arbitrage — they are signals to be
   checked, which is exactly what the agent layer's resolution-risk / comparability review is for.
-- **`--faux` is a legacy mock.** It validates the old orchestration logic only; real v2 probability estimates
+- **`--mock` is a legacy mock.** It validates the old orchestration logic only; real v2 probability estimates
   require a model key. Pi Agent integration is exercised by `--v2`.
 - **Backtest has hindsight bias.** Fixtures are *already-settled* events (e.g. GTA VI slipped, BTC hit
   $100k), so the model likely "remembers" the outcomes from training data — the 5/5 direction and
@@ -252,7 +260,7 @@ src/
   data/      types · polymarket · kalshi · http · index   (unified data layer)
   analysis/  screener · arbitrage · tracker               (analysis layer)
   agents/    piNode · graphRunner · tools · rolesV2 · orchestrateV2
-             legacy: types · llm · roles · verdict · orchestrate · fauxDemo
+             legacy: types · llm · roles · verdict · orchestrate · mockDemo
   backtest.ts                                              (Brier-score validation)
   cli.ts                                                   (screen / analyze / backtest)
 examples/                                                  (captured outputs)

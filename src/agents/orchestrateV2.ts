@@ -31,6 +31,8 @@ interface V2GraphState extends AnalysisState {
 }
 
 const pct = (n: number) => (n * 100).toFixed(1) + "%";
+const OUTPUT_TOOL_INSTRUCTION =
+  "When you finish, call exactly one output tool with normal JSON arguments. Do not put XML tags or nested parameter markup inside string fields.";
 
 function formatContext(market: UnifiedMarket, marketP: number): string {
   return [
@@ -102,9 +104,9 @@ function winnerFromText(text: string): NonNullable<AnalysisState["debate"]>["win
 function toolNamesFor(role: RoleConfig): string[] {
   switch (role.id) {
     case "market_analyst":
-      return ["polymarket_search_markets", "kalshi_search_markets", "get_verified_market_snapshot", "submit_report"];
+      return ["get_verified_market_snapshot", "get_probability_indicators", "submit_report"];
     case "microstructure_analyst":
-      return ["get_probability_indicators", "polymarket_get_orderbook", "kalshi_get_orderbook", "submit_report"];
+      return ["get_probability_indicators", "get_verified_market_snapshot", "submit_report"];
     case "cross_market_analyst":
       return ["get_cross_platform_anomaly_signals", "get_verified_market_snapshot", "submit_report"];
     case "yes_researcher":
@@ -183,6 +185,7 @@ function analystPrompt(state: V2GraphState): string {
     state.context,
     `Reports so far:\n${formatAnalystReports(state)}`,
     "Use your available tools to verify facts. Finish by calling submit_report.",
+    OUTPUT_TOOL_INSTRUCTION,
   ].join("\n\n");
 }
 
@@ -196,6 +199,7 @@ function debatePrompt(state: V2GraphState, role: RoleConfig, round: number): str
       ? "Make the strongest evidence-based YES case. Address the NO side's prior claims when present."
       : "Make the strongest evidence-based NO/PASS case. Address the YES side's prior claims.",
     "Finish by calling submit_report.",
+    OUTPUT_TOOL_INSTRUCTION,
   ].join("\n\n");
 }
 
@@ -205,6 +209,7 @@ function judgePrompt(state: V2GraphState): string {
     `Analyst reports:\n${formatAnalystReports(state)}`,
     `Debate transcript:\n${formatDebateTranscript(state)}`,
     "Judge the debate on evidence quality, resolution risk, and data gaps. Finish by calling submit_judgement.",
+    OUTPUT_TOOL_INSTRUCTION,
   ].join("\n\n");
 }
 
@@ -215,6 +220,7 @@ function decisionPrompt(state: V2GraphState): string {
     `Debate transcript:\n${formatDebateTranscript(state)}`,
     `Judge decision:\n${state.debate?.judgement ?? "(no judgement submitted)"}`,
     "Submit a calibrated final decision. If edge is weak or data quality is poor, PASS. Finish by calling submit_verdict.",
+    OUTPUT_TOOL_INSTRUCTION,
   ].join("\n\n");
 }
 
