@@ -1,4 +1,4 @@
-# squirrel
+# Squirrel
 
 **Squirrel** is a hobby open-source prediction-market data source + Pi-powered
 TradingAgents-lite analysis framework. It ingests live markets from **Polymarket** and

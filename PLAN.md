@@ -1,4 +1,4 @@
-# squirrel — architecture notes and roadmap
+# Squirrel — architecture notes and roadmap
 
 > 个人开源项目。预测市场数据源 + 分析框架 + 基于 Pi 的 TradingAgents-lite agent 判断层。
 > 状态：**MVP architecture note / roadmap**。本文档记录架构决策、known gaps、当前实现边界和后续演进方向。
