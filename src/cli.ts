@@ -1,6 +1,7 @@
 // CLI entry point. Three acceptance commands (see PLAN §11):
 //   screen                      — data + analysis layer: candidates / cross-platform spreads / probability swings
 //   analyze --market <q> [--faux] — agent decision layer, runs the full pipeline on a single market
+//   analyze --market <q> --v2     — Pi Agent runtime path with role-specific tool calls
 //   backtest [--faux]           — backtest + Brier score
 //
 // --faux: use a mock LLM (no ANTHROPIC_API_KEY needed) to validate the orchestration logic.
@@ -12,6 +13,7 @@ import { topMovers } from "./analysis/tracker.js";
 import { createLLM, createFauxLLM, type LLM } from "./agents/llm.js";
 import { demoResponder } from "./agents/fauxDemo.js";
 import { analyze } from "./agents/orchestrate.js";
+import { analyzeV2 } from "./agents/orchestrateV2.js";
 import { backtest, FIXTURES } from "./backtest.js";
 import { fetchOOSCases, runOOS } from "./oos.js";
 import { yesProbability } from "./data/types.js";
@@ -109,8 +111,7 @@ async function screen(): Promise<void> {
 
 // ───────────────────────── analyze ─────────────────────────
 
-function pickLLM(faux: boolean): LLM {
-  if (faux) return createFauxLLM(demoResponder);
+function assertRealLLMConfigured(): void {
   if (!process.env.AI_GATEWAY_API_KEY && !process.env.ANTHROPIC_API_KEY) {
     console.error(
       "Set AI_GATEWAY_API_KEY (Vercel AI Gateway) or ANTHROPIC_API_KEY for real runs; " +
@@ -118,6 +119,11 @@ function pickLLM(faux: boolean): LLM {
     );
     process.exit(1);
   }
+}
+
+function pickLLM(faux: boolean): LLM {
+  if (faux) return createFauxLLM(demoResponder);
+  assertRealLLMConfigured();
   return createLLM();
 }
 
@@ -137,8 +143,14 @@ function printVerdict(v: Verdict | undefined): void {
 
 async function runAnalyze(): Promise<void> {
   const faux = hasFlag("faux");
+  const v2 = hasFlag("v2");
   const query = getOpt("market");
-  const llm = pickLLM(faux);
+  if (v2 && faux) {
+    console.error("--v2 uses the real Pi Agent runtime and does not support --faux yet.");
+    process.exit(1);
+  }
+  const llm = v2 ? undefined : pickLLM(faux);
+  if (v2) assertRealLLMConfigured();
 
   console.log("Fetching markets…");
   const { data: events } = await fetchAllEvents(100);
@@ -157,9 +169,16 @@ async function runAnalyze(): Promise<void> {
   console.log(`\nMarket: "${market.question}"`);
   console.log(`Market-implied YES = ${pct(yesProbability(market) ?? 0.5)}  [${market.source}]`);
   if (faux) console.log("(faux mode: mock LLM, validates orchestration logic only)");
+  if (v2) console.log("(v2 mode: Pi Agent runtime, toolcall loops, role-specific toolsets)");
   console.log("");
 
-  const state = await analyze(llm, market, {
+  const state = v2 ? await analyzeV2(market, {
+    allMarkets: markets,
+    onProgress: (label, text) => {
+      console.log(`[${label}]`);
+      console.log(indent(text) + "\n");
+    },
+  }) : await analyze(llm!, market, {
     onProgress: (label, text) => {
       console.log(`[${label}]`);
       console.log(indent(text) + "\n");
@@ -258,7 +277,7 @@ async function main(): Promise<void> {
       await runOos();
       break;
     default:
-      console.log("Usage: npm run <screen | analyze -- --market <q> [--faux] | backtest [--faux] | oos [--dry|--faux]>");
+      console.log("Usage: npm run <screen | analyze -- --market <q> [--faux|--v2] | backtest [--faux] | oos [--dry|--faux]>");
       process.exit(1);
   }
 }

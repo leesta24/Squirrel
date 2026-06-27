@@ -12,9 +12,10 @@
 // tools/toolChoice off later requests (the model then hand-wrote a fake <tool_call> in text
 // instead of a real tool_use). Provider construction is cheap (built-in model list), so this is fine.
 
-import { createModels } from "@earendil-works/pi-ai";
+import { createModels, type Api, type Model } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { vercelAIGatewayProvider } from "@earendil-works/pi-ai/providers/vercel-ai-gateway";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { Tier, StructuredTool } from "./types.js";
 
 // Model ids per backend. Override with MODEL_DEEP / MODEL_QUICK env vars.
@@ -88,6 +89,28 @@ function pickerFor(pool: readonly { id: string }[], ids: Record<Tier, string>) {
     if (!m) throw new Error(`model not found: ${ids[tier]}`);
     return m;
   };
+}
+
+export interface PiNodeRuntime {
+  model: Model<Api>;
+  streamFn: StreamFn;
+}
+
+function piRuntimeFor(provider: ReturnType<typeof vercelAIGatewayProvider> | ReturnType<typeof anthropicProvider>, tier: Tier, ids: Record<Tier, string>): PiNodeRuntime {
+  const models = createModels();
+  models.setProvider(provider);
+  const model = pickerFor(provider.getModels(), ids)(tier) as Model<Api>;
+  return {
+    model,
+    streamFn: (m, context, options) => models.streamSimple(m, context, options) as never,
+  };
+}
+
+/** Runtime for a real Pi Agent node. The graph layer owns orchestration; Pi owns tool-call loops. */
+export function createPiNodeRuntime(tier: Tier): PiNodeRuntime {
+  if (process.env.AI_GATEWAY_API_KEY) return piRuntimeFor(vercelAIGatewayProvider(), tier, MODELS.gateway);
+  if (process.env.ANTHROPIC_API_KEY) return piRuntimeFor(anthropicProvider(), tier, MODELS.anthropic);
+  throw new Error("Set AI_GATEWAY_API_KEY (Vercel AI Gateway) or ANTHROPIC_API_KEY.");
 }
 
 function gatewayLLM(): LLM {
