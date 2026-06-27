@@ -1,6 +1,6 @@
-# squirror
+# squirrel
 
-**Squirror** is a prediction-market data source + TradingAgents-style multi-agent analysis framework,
+**Squirrel** is a prediction-market data source + TradingAgents-style multi-agent analysis framework,
 built for the ARTi 2026 Dev track. It ingests live markets from **Polymarket** and **Kalshi**, normalizes them
 into one model, screens for tradeable targets, detects cross-platform price gaps, and runs a
 multi-agent debate pipeline that outputs a calibrated probability estimate and a Kelly-sized position.

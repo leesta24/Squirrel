@@ -1,4 +1,4 @@
-# squirror — v2 重构计划
+# squirrel — v2 重构计划
 
 > ARTi 2026 Dev 赛道。预测市场数据源 + 分析框架 + 基于 Pi 的 TradingAgents-lite agent 判断层。
 > 状态：**重构计划 / plan of record**。本文档记录架构决策、known gaps、后续实现步骤，也用于提交时解释项目边界。
