@@ -1,0 +1,29 @@
+Fetching out-of-sample cases (settled after the 2026-01 model cutoff)…
+
+
+5 cases (price taken 14 days before settlement):
+  EVENT                                           SETTLED     mkt@-14d  ACTUAL
+  MicroStrategy sells any Bitcoin by May 31, 2026?2026-06-04  26%       NO
+  US forces enter Iran by April 30?               2026-04-09  54%       YES
+  US x Iran ceasefire by April 7?                 2026-04-09  28%       YES
+  US forces enter Iran by March 31?               2026-04-05  25%       NO
+  Khamenei out as Supreme Leader of Iran by March…2026-03-04  17%       YES
+
+Running the agent on each…
+
+  ✓ MicroStrategy sells any Bitcoin by May 31, 20… → p_hat 16%
+  ✓ US forces enter Iran by April 30?              → p_hat 8%
+  ✓ US x Iran ceasefire by April 7?                → p_hat 10%
+  ✓ US forces enter Iran by March 31?              → p_hat 8%
+  ✓ Khamenei out as Supreme Leader of Iran by Mar… → p_hat 8%
+
+  EVENT                                         ACTUAL  p_hat  mkt@-14d  DIR
+  MicroStrategy sells any Bitcoin by May 31, 20…NO      16%    26%       ✓
+  US forces enter Iran by April 30?             YES     8%     54%       ✗
+  US x Iran ceasefire by April 7?               YES     10%    28%       ✗
+  US forces enter Iran by March 31?             NO      8%     25%       ✓
+  Khamenei out as Supreme Leader of Iran by Mar…YES     8%     17%       ✗
+
+  Direction accuracy: 2/5
+  Brier — model: 0.507 | market@-14d: 0.313 | naive 50/50: 0.250
+  ✗ model worse than the market price

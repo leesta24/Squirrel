@@ -1,0 +1,40 @@
+Fetching markets from both platforms…
+
+Polymarket 2291 · Kalshi 1214 markets  probability∈[0,1]: ✓
+
+Top candidates (event-deduped + probability range + uncertainty weighting):
+  SOURCE     MARKET                                      YES%   VOL$    LIQ$
+  polymarket Will France win the 2026 FIFA World Cup?    21.6%  74.7M   7.9M
+  polymarket Will Argentina win the 2026 FIFA World Cup? 17.8%  76.1M   5.7M
+  polymarket Will the U.S. invade Iran before 2027?      12.5%  38.9M   374k
+  polymarket Strait of Hormuz traffic returns to normal …5.8%   37.9M   206k
+  polymarket Will the US confirm that aliens exist befor…9.5%   34.5M   760k
+  polymarket Will China invade Taiwan by end of 2026?    5.5%   37.0M   580k
+  polymarket Will Trump acquire Greenland before 2027?   5.7%   34.1M   239k
+  polymarket Will Gavin Newsom win the 2028 Democratic p…20.6%  26.2M   395k
+  polymarket Will the Iranian regime fall before 2027?   9.5%   20.8M   569k
+  polymarket Will J.D. Vance win the 2028 Republican pre…37.7%  14.1M   475k
+  polymarket Will Jesus Christ return before GTA VI?     49.5%  11.7M   402k
+  polymarket Will Gavin Newsom win the 2028 US President…14.0%  17.2M   468k
+
+Cross-platform same-event spread signals (heuristic match, direction needs review):
+  PM MARKET                                 PM%    KALSHI%  SPREAD  SIM
+  Brex IPO before 2027?                     1%     88%      86.7pp  0.50
+  Ramp IPO before 2027?                     11%    88%      77.5pp  0.50
+  Anthropic IPO before 2027?                76%    16%      60.0pp  0.50
+  Deel IPO before 2027?                     5%     60%      55.0pp  0.50
+  Rippling IPO before 2027?                 14%    60%      46.0pp  0.50
+  OpenAI IPO before 2027?                   26%    16%      10.0pp  0.50
+  Will Naftali Bennett be the next Prime Mi…13%    22%      9.5pp   0.83
+  Will Marco Rubio win the 2028 US Presiden…12%    19%      6.8pp   0.80
+
+Probability swings (last 24h):
+  SOURCE     MARKET                                        YES%   Δ24h
+  polymarket Will South Africa advance to the knockout sta…100.0% +82.5pp
+  polymarket Will Ecuador advance to the knockout stages a…100.0% +76.4pp
+  polymarket Will Ethereum dip to $1,600 in June?          100.0% +52.4pp
+  polymarket Will WTI Crude Oil (WTI) hit (LOW) $70 in Jun…100.0% +51.4pp
+  polymarket Will Turkiye advance to the knockout stages a…0.0%   -47.4pp
+  polymarket Will Bitcoin dip to $67,500 in June?          100.0% +44.5pp
+  polymarket Will Caesars Entertainment, Inc. be acquired …100.0% +43.5pp
+  polymarket Will Senegal advance to the knockout stages a…100.0% +43.5pp
