@@ -1,14 +1,33 @@
 import type { UnifiedMarket } from "../data/types.js";
 import { yesProbability } from "../data/types.js";
 import type { AnalysisState, RoleConfig, Verdict } from "./types.js";
-import { createPredictionMarketTools, pickTools, type ReportSubmission, type VerdictSubmission } from "./tools.js";
+import {
+  createPredictionMarketTools,
+  pickTools,
+  type JudgementSubmission,
+  type ReportSubmission,
+  type VerdictSubmission,
+} from "./tools.js";
 import { runPiAgentNode } from "./piNode.js";
-import { runGraph, type GraphNode } from "./graphRunner.js";
-import { V2_ROLES } from "./rolesV2.js";
+import { runGraph, type GraphEdge, type GraphNode } from "./graphRunner.js";
+import {
+  debateJudgeV2,
+  decisionManagerV2,
+  noResearcherV2,
+  V2_ANALYSTS,
+  V2_DEBATE_PARTICIPANTS,
+  V2_DEBATE_ROUNDS,
+} from "./rolesV2.js";
 
 export interface OrchestrateV2Options {
   allMarkets?: UnifiedMarket[];
   onProgress?: (label: string, text: string) => void;
+}
+
+interface V2GraphState extends AnalysisState {
+  debateRound: number;
+  maxDebateRounds: number;
+  debateLog: string[];
 }
 
 const pct = (n: number) => (n * 100).toFixed(1) + "%";
@@ -26,19 +45,36 @@ function formatContext(market: UnifiedMarket, marketP: number): string {
   ].filter(Boolean).join("\n");
 }
 
-function formatReports(reports: Record<string, string>): string {
-  const entries = Object.entries(reports);
-  if (entries.length === 0) return "(none yet)";
-  return entries.map(([role, report]) => `[${role}]\n${report}`).join("\n\n");
+function formatAnalystReports(state: AnalysisState): string {
+  const reports = V2_ANALYSTS.map((role) => state.reports[role.id] && `[${role.label}]\n${state.reports[role.id]}`)
+    .filter(Boolean);
+  return reports.length ? reports.join("\n\n") : "(none yet)";
+}
+
+function formatDebateTranscript(state: V2GraphState): string {
+  return state.debateLog.length ? state.debateLog.join("\n\n") : "(debate not started)";
 }
 
 function reportText(report: ReportSubmission): string {
+  const keySignals = report.keySignals ?? [];
+  const risks = report.risks ?? [];
+  const dataGaps = report.dataGaps ?? [];
   return [
     report.summary,
-    report.keySignals.length ? `Signals: ${report.keySignals.join("; ")}` : "",
-    report.risks.length ? `Risks: ${report.risks.join("; ")}` : "",
-    report.dataGaps.length ? `Data gaps: ${report.dataGaps.join("; ")}` : "",
+    keySignals.length ? `Signals: ${keySignals.join("; ")}` : "",
+    risks.length ? `Risks: ${risks.join("; ")}` : "",
+    dataGaps.length ? `Data gaps: ${dataGaps.join("; ")}` : "",
     `Confidence: ${report.confidence.toFixed(2)}`,
+  ].filter(Boolean).join("\n");
+}
+
+function judgementText(judgement: JudgementSubmission): string {
+  return [
+    `WINNER: ${judgement.winner}`,
+    judgement.reasoning,
+    judgement.strongestYesClaims.length ? `Strongest YES claims: ${judgement.strongestYesClaims.join("; ")}` : "",
+    judgement.strongestNoClaims.length ? `Strongest NO claims: ${judgement.strongestNoClaims.join("; ")}` : "",
+    judgement.dataGaps.length ? `Data gaps: ${judgement.dataGaps.join("; ")}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -57,6 +93,12 @@ function verdictFromSubmission(raw: VerdictSubmission, marketP: number): Verdict
   };
 }
 
+function winnerFromText(text: string): NonNullable<AnalysisState["debate"]>["winner"] {
+  if (/WINNER:\s*YES/i.test(text)) return "YES";
+  if (/WINNER:\s*NO/i.test(text)) return "NO";
+  return "UNCLEAR";
+}
+
 function toolNamesFor(role: RoleConfig): string[] {
   switch (role.id) {
     case "market_analyst":
@@ -67,68 +109,264 @@ function toolNamesFor(role: RoleConfig): string[] {
       return ["get_cross_platform_anomaly_signals", "get_verified_market_snapshot", "submit_report"];
     case "yes_researcher":
     case "no_researcher":
-      return ["get_verified_market_snapshot", "submit_report"];
+      return ["get_verified_market_snapshot", "get_probability_indicators", "submit_report"];
+    case "debate_judge":
+      return ["submit_judgement"];
     case "decision_manager":
-      return ["submit_verdict"];
+      return ["get_verified_market_snapshot", "get_probability_indicators", "submit_verdict"];
     default:
       return ["submit_report"];
   }
 }
 
-export async function analyzeV2(market: UnifiedMarket, opts: OrchestrateV2Options = {}): Promise<AnalysisState> {
-  const marketP = yesProbability(market) ?? 0.5;
-  const context = formatContext(market, marketP);
-  const state: AnalysisState = { market, marketP, context, reports: {} };
-  let submittedVerdict: VerdictSubmission | undefined;
+function makeTools(opts: {
+  state: V2GraphState;
+  market: UnifiedMarket;
+  allMarkets?: UnifiedMarket[];
+  reportKey: string;
+  marketP: number;
+}) {
+  return createPredictionMarketTools({
+    market: opts.market,
+    allMarkets: opts.allMarkets,
+    roleId: opts.reportKey,
+    onReport: (roleId, report) => {
+      opts.state.reports[roleId] = reportText(report);
+    },
+    onJudgement: (judgement) => {
+      opts.state.debate = {
+        transcript: formatDebateTranscript(opts.state),
+        winner: judgement.winner,
+        judgement: judgementText(judgement),
+      };
+    },
+    onVerdict: (verdict) => {
+      opts.state.verdict = verdictFromSubmission(verdict, opts.marketP);
+    },
+  });
+}
 
-  const nodes: GraphNode<AnalysisState>[] = V2_ROLES.map((role) => ({
+async function runReportNode(opts: {
+  state: V2GraphState;
+  role: RoleConfig;
+  reportKey: string;
+  progressLabel: string;
+  prompt: string;
+  market: UnifiedMarket;
+  allMarkets?: UnifiedMarket[];
+  marketP: number;
+  onProgress?: OrchestrateV2Options["onProgress"];
+}): Promise<string> {
+  const tools = makeTools({
+    state: opts.state,
+    market: opts.market,
+    allMarkets: opts.allMarkets,
+    reportKey: opts.reportKey,
+    marketP: opts.marketP,
+  });
+
+  const result = await runPiAgentNode({
+    role: { ...opts.role, label: opts.progressLabel },
+    prompt: opts.prompt,
+    tools: pickTools(tools, toolNamesFor(opts.role)),
+    onTool: (label, text) => opts.onProgress?.(`${label} · tool`, text),
+  });
+
+  const report = opts.state.reports[opts.reportKey] ?? (result.text || "(no report submitted)");
+  opts.state.reports[opts.reportKey] = report;
+  opts.onProgress?.(opts.progressLabel, report);
+  return report;
+}
+
+function analystPrompt(state: V2GraphState): string {
+  return [
+    state.context,
+    `Reports so far:\n${formatAnalystReports(state)}`,
+    "Use your available tools to verify facts. Finish by calling submit_report.",
+  ].join("\n\n");
+}
+
+function debatePrompt(state: V2GraphState, role: RoleConfig, round: number): string {
+  return [
+    state.context,
+    `Analyst reports:\n${formatAnalystReports(state)}`,
+    `Debate transcript so far:\n${formatDebateTranscript(state)}`,
+    `This is debate round ${round}/${state.maxDebateRounds}.`,
+    role.id === "yes_researcher"
+      ? "Make the strongest evidence-based YES case. Address the NO side's prior claims when present."
+      : "Make the strongest evidence-based NO/PASS case. Address the YES side's prior claims.",
+    "Finish by calling submit_report.",
+  ].join("\n\n");
+}
+
+function judgePrompt(state: V2GraphState): string {
+  return [
+    state.context,
+    `Analyst reports:\n${formatAnalystReports(state)}`,
+    `Debate transcript:\n${formatDebateTranscript(state)}`,
+    "Judge the debate on evidence quality, resolution risk, and data gaps. Finish by calling submit_judgement.",
+  ].join("\n\n");
+}
+
+function decisionPrompt(state: V2GraphState): string {
+  return [
+    state.context,
+    `Analyst reports:\n${formatAnalystReports(state)}`,
+    `Debate transcript:\n${formatDebateTranscript(state)}`,
+    `Judge decision:\n${state.debate?.judgement ?? "(no judgement submitted)"}`,
+    "Submit a calibrated final decision. If edge is weak or data quality is poor, PASS. Finish by calling submit_verdict.",
+  ].join("\n\n");
+}
+
+function buildGraph(opts: {
+  market: UnifiedMarket;
+  allMarkets?: UnifiedMarket[];
+  marketP: number;
+  onProgress?: OrchestrateV2Options["onProgress"];
+}) {
+  const firstAnalyst = V2_ANALYSTS[0];
+  if (!firstAnalyst) throw new Error("v2 graph has no analyst start node");
+  const firstDebater = V2_DEBATE_PARTICIPANTS[0];
+  const secondDebater = V2_DEBATE_PARTICIPANTS[1];
+
+  const analystNodes: GraphNode<V2GraphState>[] = V2_ANALYSTS.map((role) => ({
     id: role.id,
-    async run({ state: graphState }) {
-      const tools = createPredictionMarketTools({
-        market,
-        allMarkets: opts.allMarkets,
-        roleId: role.id,
-        onReport: (roleId, report) => {
-          graphState.reports[roleId] = reportText(report);
-        },
-        onVerdict: (verdict) => {
-          submittedVerdict = verdict;
-          graphState.verdict = verdictFromSubmission(verdict, marketP);
-        },
-      });
-
-      const prompt =
-        `${graphState.context}\n\nReports so far:\n${formatReports(graphState.reports)}\n\n` +
-        "Use your available tools. If you are an analyst/researcher, finish with submit_report. " +
-        "If you are the Decision Manager, finish with submit_verdict.";
-
-      const result = await runPiAgentNode({
+    async run({ state }) {
+      await runReportNode({
+        state,
         role,
-        prompt,
-        tools: pickTools(tools, toolNamesFor(role)),
-        onTool: (label, text) => opts.onProgress?.(`${label} · tool`, text),
+        reportKey: role.id,
+        progressLabel: role.label,
+        prompt: analystPrompt(state),
+        market: opts.market,
+        allMarkets: opts.allMarkets,
+        marketP: opts.marketP,
+        onProgress: opts.onProgress,
       });
-
-      if (role.id !== "decision_manager" && !graphState.reports[role.id]) {
-        graphState.reports[role.id] = result.text || "(no report submitted)";
-      }
-      opts.onProgress?.(role.label, graphState.reports[role.id] ?? result.text);
     },
   }));
 
-  if (!V2_ROLES[0]) throw new Error("v2 graph has no start node");
-  await runGraph(
-    {
-      start: V2_ROLES[0].id,
-      nodes,
-      edges: Object.fromEntries(
-        V2_ROLES.map((role, i) => [role.id, V2_ROLES[i + 1]?.id]),
-      ),
-      maxSteps: V2_ROLES.length + 2,
+  const debateNode = (role: RoleConfig): GraphNode<V2GraphState> => ({
+    id: role.id,
+    async run({ state }) {
+      const round = state.debateRound + 1;
+      const reportKey = `${role.id}_round_${round}`;
+      const progressLabel = `${role.label} · round ${round}`;
+      const report = await runReportNode({
+        state,
+        role,
+        reportKey,
+        progressLabel,
+        prompt: debatePrompt(state, role, round),
+        market: opts.market,
+        allMarkets: opts.allMarkets,
+        marketP: opts.marketP,
+        onProgress: opts.onProgress,
+      });
+
+      state.debateLog.push(`[Round ${round} · ${role.label}]\n${report}`);
+      if (role.id === noResearcherV2.id) {
+        state.debateRound += 1;
+        state.debate = {
+          transcript: formatDebateTranscript(state),
+          winner: state.debate?.winner ?? "UNCLEAR",
+          judgement: state.debate?.judgement ?? "",
+        };
+      }
     },
+  });
+
+  const judgeNode: GraphNode<V2GraphState> = {
+    id: debateJudgeV2.id,
+    async run({ state }) {
+      const result = await runPiAgentNode({
+        role: debateJudgeV2,
+        prompt: judgePrompt(state),
+        tools: pickTools(
+          makeTools({
+            state,
+            market: opts.market,
+            allMarkets: opts.allMarkets,
+            reportKey: debateJudgeV2.id,
+            marketP: opts.marketP,
+          }),
+          toolNamesFor(debateJudgeV2),
+        ),
+        onTool: (label, text) => opts.onProgress?.(`${label} · tool`, text),
+      });
+
+      if (!state.debate?.judgement) {
+        state.debate = {
+          transcript: formatDebateTranscript(state),
+          winner: winnerFromText(result.text),
+          judgement: result.text || "(no judgement submitted)",
+        };
+      }
+      opts.onProgress?.(debateJudgeV2.label, state.debate.judgement);
+    },
+  };
+
+  const decisionNode: GraphNode<V2GraphState> = {
+    id: decisionManagerV2.id,
+    async run({ state }) {
+      const result = await runPiAgentNode({
+        role: decisionManagerV2,
+        prompt: decisionPrompt(state),
+        tools: pickTools(
+          makeTools({
+            state,
+            market: opts.market,
+            allMarkets: opts.allMarkets,
+            reportKey: decisionManagerV2.id,
+            marketP: opts.marketP,
+          }),
+          toolNamesFor(decisionManagerV2),
+        ),
+        onTool: (label, text) => opts.onProgress?.(`${label} · tool`, text),
+      });
+      opts.onProgress?.(decisionManagerV2.label, state.verdict ? state.verdict.reasoning : result.text);
+    },
+  };
+
+  const edges: Record<string, GraphEdge<V2GraphState>> = {};
+  for (const [i, role] of V2_ANALYSTS.entries()) {
+    edges[role.id] = V2_ANALYSTS[i + 1]?.id ?? firstDebater.id;
+  }
+  edges[firstDebater.id] = secondDebater.id;
+  edges[secondDebater.id] = ({ state }: { state: V2GraphState }) =>
+    state.debateRound < state.maxDebateRounds ? firstDebater.id : debateJudgeV2.id;
+  edges[debateJudgeV2.id] = decisionManagerV2.id;
+  edges[decisionManagerV2.id] = undefined;
+
+  return {
+    start: firstAnalyst.id,
+    nodes: [...analystNodes, debateNode(firstDebater), debateNode(secondDebater), judgeNode, decisionNode],
+    edges,
+    maxSteps: V2_ANALYSTS.length + V2_DEBATE_ROUNDS * V2_DEBATE_PARTICIPANTS.length + 2,
+  };
+}
+
+export async function analyzeV2(market: UnifiedMarket, opts: OrchestrateV2Options = {}): Promise<AnalysisState> {
+  const marketP = yesProbability(market) ?? 0.5;
+  const state: V2GraphState = {
+    market,
+    marketP,
+    context: formatContext(market, marketP),
+    reports: {},
+    debateRound: 0,
+    maxDebateRounds: V2_DEBATE_ROUNDS,
+    debateLog: [],
+  };
+
+  await runGraph(
+    buildGraph({
+      market,
+      allMarkets: opts.allMarkets,
+      marketP,
+      onProgress: opts.onProgress,
+    }),
     state,
   );
 
-  if (!state.verdict && submittedVerdict) state.verdict = verdictFromSubmission(submittedVerdict, marketP);
   return state;
 }

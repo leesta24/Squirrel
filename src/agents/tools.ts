@@ -27,11 +27,20 @@ export interface VerdictSubmission {
   dataGaps: string[];
 }
 
+export interface JudgementSubmission {
+  winner: "YES" | "NO" | "UNCLEAR";
+  reasoning: string;
+  strongestYesClaims: string[];
+  strongestNoClaims: string[];
+  dataGaps: string[];
+}
+
 export interface PredictionToolContext {
   market: UnifiedMarket;
   allMarkets?: UnifiedMarket[];
   roleId?: string;
   onReport?: (roleId: string, report: ReportSubmission) => void;
+  onJudgement?: (judgement: JudgementSubmission) => void;
   onVerdict?: (verdict: VerdictSubmission) => void;
 }
 
@@ -257,6 +266,28 @@ export function createPredictionMarketTools(ctx: PredictionToolContext): AgentTo
     },
   };
 
+  const submitJudgement: AgentTool = {
+    name: "submit_judgement",
+    label: "Submit Debate Judgement",
+    description: "Submit the debate judge's structured winner and reasoning, then finish the node.",
+    parameters: Type.Object({
+      winner: Type.String({ description: "YES, NO, or UNCLEAR" }),
+      reasoning: Type.String({ description: "Why this side won the debate, or why the debate is inconclusive" }),
+      strongestYesClaims: Type.Array(Type.String(), { description: "Best arguments made by the YES researcher" }),
+      strongestNoClaims: Type.Array(Type.String(), { description: "Best arguments made by the NO researcher" }),
+      dataGaps: Type.Array(Type.String(), { description: "Missing or partial data that limits confidence" }),
+    }),
+    async execute(_toolCallId, params) {
+      const raw = params as Omit<JudgementSubmission, "winner"> & { winner: string };
+      const normalized = String(raw.winner).toUpperCase();
+      const winner: JudgementSubmission["winner"] =
+        normalized === "YES" || normalized === "NO" ? normalized : "UNCLEAR";
+      const judgement: JudgementSubmission = { ...raw, winner };
+      ctx.onJudgement?.(judgement);
+      return textResult({ judgement }, true);
+    },
+  };
+
   const submitVerdict: AgentTool = {
     name: "submit_verdict",
     label: "Submit Verdict",
@@ -289,6 +320,7 @@ export function createPredictionMarketTools(ctx: PredictionToolContext): AgentTo
     kalshiOrderbook,
     crossPlatformSignals,
     submitReport,
+    submitJudgement,
     submitVerdict,
   ];
 }

@@ -87,6 +87,7 @@ type NodeId =
   | "cross_market_analyst"
   | "yes_researcher"
   | "no_researcher"
+  | "debate_judge"
   | "decision_manager";
 
 interface GraphNode {
@@ -147,7 +148,7 @@ flowchart TD
     PT[Polymarket tools]
     KT[Kalshi tools]
     UT[Unified derived tools]
-    OT[Output tools: submit_report / submit_verdict]
+    OT[Output tools: submit_report / submit_judgement / submit_verdict]
   end
 
   subgraph G[TradingAgents-lite graph]
@@ -156,6 +157,7 @@ flowchart TD
     XA[Cross-market / Resolution Analyst · Pi Agent]
     YES[YES Researcher · Pi Agent]
     NO[NO Researcher · Pi Agent]
+    J[Debate Judge · Pi Agent]
     DM[Decision Manager · Pi Agent]
   end
 
@@ -167,10 +169,11 @@ flowchart TD
   T --> XA
   T --> YES
   T --> NO
+  T --> J
   T --> DM
   MA --> MI --> XA --> YES --> NO
   NO -->|round < max| YES
-  NO -->|round done| DM
+  NO -->|round done| J --> DM
 ```
 
 三层职责：
@@ -232,6 +235,10 @@ Kalshi：
   - Analyst 节点调用。
   - schema: `{ summary, keySignals, risks, confidence, dataGaps }`
   - tool result 可设置 `terminate: true`，表示当前 agent 节点完成。
+- `submit_judgement`
+  - Debate Judge 节点调用。
+  - schema: `{ winner, reasoning, strongestYesClaims, strongestNoClaims, dataGaps }`
+  - 用结构化 winner 写入 `state.debate`，避免从自由文本猜测裁决。
 - `submit_verdict`
   - Decision Manager 调用。
   - schema: `{ side, pHat, marketP, edge, action, size, reasoning, dataGaps }`
@@ -264,9 +271,10 @@ Kalshi：
 | Market Analyst | `polymarket_search_markets`, `kalshi_search_markets`, `get_verified_market_snapshot`, `submit_report` |
 | Microstructure Analyst | `polymarket_get_orderbook`, `kalshi_get_orderbook`, `get_probability_history`, `get_probability_indicators`, `submit_report` |
 | Cross-market / Resolution Analyst | `get_related_markets`, `polymarket_get_market`, `kalshi_get_market`, `get_cross_platform_anomaly_signals`, `submit_report` |
-| YES Researcher | analyst reports + optional `get_verified_market_snapshot`, `submit_report` |
-| NO Researcher | analyst reports + optional `get_verified_market_snapshot`, `submit_report` |
-| Decision Manager | `submit_verdict` |
+| YES Researcher | analyst reports + debate transcript + optional `get_verified_market_snapshot`, `get_probability_indicators`, `submit_report` |
+| NO Researcher | analyst reports + debate transcript + optional `get_verified_market_snapshot`, `get_probability_indicators`, `submit_report` |
+| Debate Judge | analyst reports + full debate transcript + `submit_judgement` |
+| Decision Manager | analyst reports + debate transcript + judge decision + `get_verified_market_snapshot`, `get_probability_indicators`, `submit_verdict` |
 
 ---
 
@@ -281,7 +289,8 @@ Kalshi：
 | News / Fundamentals | Cross-market / Resolution Analyst | 检查相似市场、结算规则、定义歧义、跨平台异常 |
 | Bull Researcher | YES Researcher | 基于报告论证 YES 发生 |
 | Bear Researcher | NO Researcher | 基于报告论证 NO 发生 |
-| Research Manager / Trader / Risk | Decision Manager | 输出 `pHat`, `edge`, `side`, `action`, `size`, `dataGaps` |
+| Research Manager | Debate Judge | 多轮辩论后裁决更强一方或标记 UNCLEAR |
+| Trader / Risk | Decision Manager | 输出 `pHat`, `edge`, `side`, `action`, `size`, `dataGaps` |
 
 可选扩展：
 

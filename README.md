@@ -1,13 +1,19 @@
 # squirrel
 
-**Squirrel** is a prediction-market data source + TradingAgents-style multi-agent analysis framework,
+**Squirrel** is a prediction-market data source + Pi-powered TradingAgents-lite analysis framework,
 built for the ARTi 2026 Dev track. It ingests live markets from **Polymarket** and **Kalshi**, normalizes them
-into one model, screens for tradeable targets, detects cross-platform price gaps, and runs a
-multi-agent debate pipeline that outputs a calibrated probability estimate and a Kelly-sized position.
+into one model, screens for tradeable targets, exposes market APIs as Pi tools, and runs a
+multi-agent graph that outputs a calibrated probability estimate and a position recommendation.
 
 The core idea: stock trading bets on **price direction**; prediction markets bet on the gap between the
 **market-implied probability and the true probability** (mispricing). Binary 0/1 settlement also gives
 an unusually clean ground truth for evaluation.
+
+Scope note: this repo targets **framework capability**, not a claim of stable trading alpha. The current
+prediction quality is intentionally framed with **data-source gaps known**: public APIs do not provide every
+historical orderbook snapshot, trade print, news item, macro series, or authoritative settlement feed that a
+production forecaster would want. If richer real data sources are added, the Pi tool layer and graph can reuse
+them without changing the core orchestration model.
 
 ---
 
@@ -24,21 +30,46 @@ flowchart TD
     AR[arbitrage · cross-platform spread]
     TR[tracker · 24h probability moves]
   end
-  subgraph G[Agent layer · Pi orchestration]
-    AN[Analysts ×4] --> DB[YES/NO debate] --> ES[Estimator · p_hat] --> RK[Risk · Kelly] --> V[Structured verdict]
+  subgraph T[Pi AgentTool layer]
+    PT[Polymarket tools]
+    KT[Kalshi tools]
+    DT[Derived market tools]
+    OT[Output tools]
   end
-  D --> A --> G
+  subgraph G[V2 Agent graph · Pi Agent runtime]
+    MA[Market Analyst] --> MI[Microstructure Analyst] --> XA[Cross-market / Resolution Analyst]
+    XA --> YES[YES Researcher]
+    YES --> NO[NO Researcher]
+    NO -->|round < max| YES
+    NO -->|rounds done| J[Debate Judge]
+    J --> DM[Decision Manager] --> V[Structured verdict]
+  end
+  D --> A --> T --> G
 ```
 
-Three layers, decoupled:
+Four layers, decoupled:
 
 - **Data layer** (`src/data/`) — per-platform adapters map raw API payloads into a unified
   `Event / Market / Outcome` model with probabilities normalized to `[0, 1]`. Reading public data needs
   **no API key** on either platform.
 - **Analysis layer** (`src/analysis/`) — `screener` (find tradeable targets), `arbitrage` (cross-platform
   spread signals), `tracker` (probability momentum).
-- **Agent layer** (`src/agents/`) — a TradingAgents pipeline re-implemented on the [Pi](https://github.com/earendil-works/pi)
-  SDK: analysts → adversarial YES/NO debate → estimator → risk/Kelly → structured verdict.
+- **Tool layer** (`src/agents/tools.ts`) — wraps Polymarket, Kalshi, normalized snapshots, indicators,
+  cross-platform anomaly signals, and structured output tools as Pi `AgentTool`s.
+- **Agent graph** (`src/agents/orchestrateV2.ts`) — a TradingAgents-inspired graph of real
+  `@earendil-works/pi-agent-core` `Agent` nodes: analysts → multi-round YES/NO debate → judge →
+  decision manager.
+
+### Pi SDK layering
+
+Pi is used at two layers:
+
+- `@earendil-works/pi-ai` provides model/provider plumbing and TypeBox schemas.
+- `@earendil-works/pi-agent-core` provides the real single-agent runtime in v2: system prompt, toolset,
+  toolcall loop, tool execution events, and termination through output tools.
+
+Pi does not provide a LangGraph-style multi-agent `StateGraph`, so Squirrel adds a small graph runner
+(`src/agents/graphRunner.ts`). In short: **Pi runs each agent; Squirrel orchestrates the agents.**
 
 ### Agent roles: TradingAgents → prediction markets
 
@@ -52,9 +83,8 @@ The skeleton (analysts → adversarial debate → decision → risk → verdict)
 | Sentiment Analyst | **Microstructure & Sentiment** | haiku | Orderbook liquidity + herding + cross-platform gap |
 | Technical Analyst | *removed* | — | Share price *is* the probability; TA is meaningless |
 | Bull vs Bear debate | **YES vs NO debate** | opus | The most valuable transferable part — kept as-is |
-| Research Manager | **Research Manager** | opus | Judges the stronger side |
-| Trader (BUY/SELL/HOLD) | **Estimator** | opus | Outputs `p_hat` and `edge = p_hat − market_p` |
-| Risk team + Fund Manager | **Risk / Kelly** | opus | Fractional-Kelly position sizing |
+| Research Manager | **Debate Judge** | opus | Judges the stronger side after configured rounds |
+| Trader / Risk Manager | **Decision Manager** | opus | Outputs `p_hat`, side, action, size, and data gaps |
 | — (new) | **Resolution-Risk Analyst** | haiku | Settlement risk: ambiguous definitions, unreliable source, voiding |
 | Reflector (memory) | *architecture only* | — | Brier-score reflection — see [Extension points](#extension-points) |
 
@@ -68,9 +98,9 @@ convention. This project keeps what is good and fixes the pain points:
 
 | Original pain point | Here |
 |---|---|
-| Prompts hardcoded in factory functions | Roles are **declarative config** (`agents/roles.ts`); one generic executor runs them |
+| Prompts hardcoded in factory functions | Roles are **declarative config** (`agents/rolesV2.ts`); one generic Pi node executor runs them |
 | `should_continue_<key>` reflection convention | One generic loop drives every role |
-| Debate topology hand-wired | A debate team is **config** (`{ participants, rounds, judge }`) |
+| Debate topology hand-wired | Debate rounds, judge, and next-node edges are graph config |
 | Flat, hardcoded state keys | Generic container `reports: Record<roleId, string>` — adding a role doesn't touch the schema |
 
 Net effect: adding the Resolution-Risk analyst, or reusing the bull/bear team as YES/NO, is **just config** —
@@ -118,13 +148,18 @@ cross-platform spread signals, and 24h probability movers. No API key needed.
 ### `analyze` — agent decision layer
 
 ```bash
-npm run analyze -- --market "fed"          # real run (needs a key in .env.local)
-npm run analyze -- --market "fed" --faux   # mock LLM, validates the pipeline
+npm run analyze -- --market "fed" --v2     # real Pi Agent graph (needs a key in .env.local)
+npm run analyze -- --market "fed"          # legacy structured-output pipeline
+npm run analyze -- --market "fed" --faux   # legacy mock LLM, validates orchestration without API calls
 ```
 
 `--market` matches a market id or a substring of the question; omit it to pick the top screened
 candidate. Streams each role's output, then prints a structured verdict:
 `side · p_hat · market_p · edge · kelly_fraction · recommendation · reasoning`.
+
+`--v2` is the intended architecture path: each role is a real Pi `Agent` with a role-specific toolset,
+and the graph runs analysts → two YES/NO debate rounds → debate judge → decision manager. `--faux`
+does not exercise the Pi Agent toolcall loop and is therefore kept on the legacy path only.
 
 ### `backtest` — agent validation
 
@@ -145,7 +180,8 @@ See [`examples/`](examples/) for captured outputs.
 | Command | Pass criteria |
 |---|---|
 | `npm run screen` | Real market names (not mock), all `probability∈[0,1]`, spread signals appear |
-| `npm run analyze -- --market <q>` | Full pipeline runs, every role speaks, debate ends on configured rounds, verdict passes schema |
+| `npm run analyze -- --market <q> --v2` | Pi Agent graph runs, tools are called, debate ends after configured rounds, judge and verdict pass schemas |
+| `npm run analyze -- --market <q> --faux` | Legacy mock path runs without a model key |
 | `npm run backtest` | Brier score computes, direction is non-random (not required to beat the market) |
 
 `tsc --noEmit` typechecks the whole project (`strict` + `noUncheckedIndexedAccess`).
@@ -181,12 +217,17 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
 
 ## Known limitations
 
+- **Framework capability target, data-source gaps known.** The main deliverable is the Pi agent/tool/graph
+  framework. Forecast quality is limited by the public data currently available through Polymarket/Kalshi
+  and by missing production-grade feeds such as historical orderbook snapshots, trade-level history,
+  trusted news/event feeds, macro series, and settlement-rule monitoring. Adding those sources should
+  improve predictions without changing the graph architecture.
 - **Cross-platform matching is heuristic.** Title-token Jaccard finds *candidate* same-event pairs, but a
   high similarity does not guarantee the two outcomes are defined the same way (one may ask "X happens",
   the other "X first"). Large spreads are often apples-to-oranges, not arbitrage — they are signals to be
   checked, which is exactly what the agent layer's resolution-risk / comparability review is for.
-- **`--faux` is a mock.** It validates orchestration logic only; real probability estimates require a Claude
-  key. Pi-SDK integration is exercised by the real path.
+- **`--faux` is a legacy mock.** It validates the old orchestration logic only; real v2 probability estimates
+  require a model key. Pi Agent integration is exercised by `--v2`.
 - **Backtest has hindsight bias.** Fixtures are *already-settled* events (e.g. GTA VI slipped, BTC hit
   $100k), so the model likely "remembers" the outcomes from training data — the 5/5 direction and
   Brier 0.072 (vs 0.162 market) demonstrate the *metric pipeline works and direction is sane*, not
@@ -199,8 +240,9 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
   into per-role memory for injection on the next run (the backtest already implements the offline metric).
 - **Fully automated backtest** — pull settled markets and fetch pre-settlement prices via Polymarket's
   `prices-history` API instead of fixtures.
-- **More roles** — add a config object to `agents/roles.ts`; the executor and orchestrator don't change.
-- **ARTi integration** — the agent layer is a plain function `analyze(llm, market)`; wrap it as an ARTi
+- **More roles** — add a config object to `agents/rolesV2.ts` and wire it in `orchestrateV2.ts`; the Pi
+  node executor and graph runner stay generic.
+- **ARTi integration** — the v2 agent layer is a plain function `analyzeV2(market)`; wrap it as an ARTi
   tool/skill, or swap `llm.ts` to route through ARTi's model layer.
 
 ## Project layout
@@ -209,7 +251,8 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
 src/
   data/      types · polymarket · kalshi · http · index   (unified data layer)
   analysis/  screener · arbitrage · tracker               (analysis layer)
-  agents/    types · llm · roles · verdict · orchestrate · fauxDemo
+  agents/    piNode · graphRunner · tools · rolesV2 · orchestrateV2
+             legacy: types · llm · roles · verdict · orchestrate · fauxDemo
   backtest.ts                                              (Brier-score validation)
   cli.ts                                                   (screen / analyze / backtest)
 examples/                                                  (captured outputs)
