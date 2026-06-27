@@ -303,3 +303,7 @@ src/
 examples/                                                  (captured outputs)
 PLAN.md                                                    (design doc)
 ```
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

@@ -2,6 +2,7 @@
   "name": "squirrel",
   "version": "0.1.0",
   "description": "Prediction market data source + Pi-powered TradingAgents-lite analysis framework (Polymarket + Kalshi)",
+  "license": "Apache-2.0",
   "type": "module",
   "private": true,
   "scripts": {
