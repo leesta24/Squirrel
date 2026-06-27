@@ -1,9 +1,10 @@
 # squirrel
 
-**Squirrel** is a prediction-market data source + Pi-powered TradingAgents-lite analysis framework,
-built for the ARTi 2026 Dev track. It ingests live markets from **Polymarket** and **Kalshi**, normalizes them
-into one model, screens for tradeable targets, exposes market APIs as Pi tools, and runs a
-multi-agent graph that outputs a calibrated probability estimate and a position recommendation.
+**Squirrel** is a hobby open-source prediction-market data source + Pi-powered
+TradingAgents-lite analysis framework. It ingests live markets from **Polymarket** and
+**Kalshi**, normalizes them into one model, screens for tradeable targets, exposes market
+APIs as Pi tools, and runs a multi-agent graph that outputs a calibrated probability
+estimate and a position recommendation.
 
 The core idea: stock trading bets on **price direction**; prediction markets bet on the gap between the
 **market-implied probability and the true probability** (mispricing). Binary 0/1 settlement also gives
@@ -105,21 +106,25 @@ The skeleton (analysts → adversarial debate → decision → risk → verdict)
 
 ---
 
-## Design: where this improves on the original
+## Design: relationship to TradingAgents
 
-Reading the TradingAgents source, the data/LLM layers are clean but the **agent definitions and debate
-topology are hardcoded** — adding a role means editing 4–5 files plus a reflection-based `should_continue_<key>`
-convention. This project keeps what is good and fixes the pain points:
+Squirrel borrows the high-level TradingAgents pattern: specialist analysts, adversarial
+researchers, a judging step, and a final decision manager. The implementation is deliberately
+smaller and Pi-native: Pi runs each single-agent toolcall loop, while Squirrel provides a thin
+graph runner and deterministic router.
 
-| Original pain point | Here |
-|---|---|
-| Prompts hardcoded in factory functions | Roles are **declarative config** (`agents/rolesV2.ts`); one generic Pi node executor runs them |
-| `should_continue_<key>` reflection convention | One generic loop drives every role |
-| Debate topology hand-wired | Debate rounds, judge, and next-node edges are graph config |
-| Flat, hardcoded state keys | Generic container `reports: Record<roleId, string>` — adding a role doesn't touch the schema |
+The current MVP should be read as a framework-capability target, not a mature TradingAgents
+replacement. TradingAgents remains stronger in its LangGraph infrastructure, checkpoint/resume
+support, memory/reflection loop, broader vendor/tool ecosystem, and productized CLI/docs. Squirrel's
+near-term design goal is to make the prediction-market-specific graph easy to inspect and extend.
 
-Net effect: adding the Resolution-Risk analyst, or reusing the bull/bear team as YES/NO, is **just config** —
-the orchestration internals don't change.
+| Capability | Squirrel MVP | TradingAgents-style mature version |
+|---|---|---|
+| Single agent loop | Real Pi `Agent` nodes with role-specific tools | LangGraph nodes with tool nodes |
+| Multi-agent graph | Lightweight TypeScript runner | Full `StateGraph` assembly and checkpointing |
+| Routing | Deterministic state router for debate continuation | Conditional edges across analyst/tool/debate/risk nodes |
+| Memory | Planned Brier/log-loss reflection | Decision logs, reflection, and resume flows |
+| Data vendors | Polymarket/Kalshi adapters + derived tools | Broader provider registry and validated data contracts |
 
 ---
 
@@ -245,6 +250,10 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
   and by missing production-grade feeds such as historical orderbook snapshots, trade-level history,
   trusted news/event feeds, macro series, and settlement-rule monitoring. Adding those sources should
   improve predictions without changing the graph architecture.
+- **Known architecture maturity gaps.** Compared with a full TradingAgents-style system, this MVP does not
+  yet have checkpoint/resume, durable decision logs, post-settlement reflection memory, a typed shared state
+  schema for every node, dynamic graph assembly from config, or a v2-native backtest/OOS evaluator. The current
+  router is state-driven but its target set is narrow: it loops YES/NO debate or proceeds to the judge.
 - **Cross-platform matching is heuristic.** Title-token Jaccard finds *candidate* same-event pairs, but a
   high similarity does not guarantee the two outcomes are defined the same way (one may ask "X happens",
   the other "X first"). Large spreads are often apples-to-oranges, not arbitrage — they are signals to be
@@ -265,8 +274,10 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
   `prices-history` API instead of fixtures.
 - **More roles** — add a config object to `agents/rolesV2.ts` and wire it in `orchestrateV2.ts`; the Pi
   node executor and graph runner stay generic.
-- **ARTi integration** — the v2 agent layer is a plain function `analyzeV2(market)`; wrap it as an ARTi
-  tool/skill, or swap `llm.ts` to route through ARTi's model layer.
+- **Router expansion** — allow the Debate Router to route back to a specific analyst, enter a Macro/News
+  Analyst, or hand off to a dedicated Risk Manager before the final verdict.
+- **Host integration** — the v2 agent layer is a plain function `analyzeV2(market)`; wrap it in another app,
+  API service, scheduled monitor, or research notebook without changing agent internals.
 
 ## Project layout
 

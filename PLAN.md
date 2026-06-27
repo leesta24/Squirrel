@@ -1,52 +1,51 @@
-# squirrel — v2 重构计划
+# squirrel — architecture notes and roadmap
 
-> ARTi 2026 Dev 赛道。预测市场数据源 + 分析框架 + 基于 Pi 的 TradingAgents-lite agent 判断层。
-> 状态：**重构计划 / plan of record**。本文档记录架构决策、known gaps、后续实现步骤，也用于提交时解释项目边界。
+> 个人开源项目。预测市场数据源 + 分析框架 + 基于 Pi 的 TradingAgents-lite agent 判断层。
+> 状态：**MVP architecture note / roadmap**。本文档记录架构决策、known gaps、当前实现边界和后续演进方向。
 
 ---
 
-## 1. 题目与目标
+## 1. 项目目标
 
-ARTi Dev Track 原题要求：
+Squirrel 是一个轻量 prediction-market research playground：
 
 1. 接入 **Polymarket** 和 **Kalshi** 的公开 API，获取实时市场数据（标的、概率、成交量）。
 2. 设计一个**分析框架**：筛选有价值标的、追踪概率变化、识别异常信号。
-3. 参考 **TradingAgents** 的架构，加入一个简单的 **Agent 判断层**（可以是 prompt + 结构化输出）。
-4. 写清 README：数据结构说明、框架设计思路、示例输出。
-
-交付物：GitHub repo，包含数据接入模块 + 分析框架 + README + 示例输出 + **个人简历**。
+3. 参考 **TradingAgents** 的架构，加入基于 Pi Agent runtime 的多角色判断层。
+4. 通过 README / examples / roadmap 说明数据结构、框架设计思路、示例输出和已知边界。
 
 本项目的定位：
 
 - **主目标**：证明框架能力，而不是声称模型已具备稳定预测 alpha。
-- **核心能力**：把多平台预测市场数据标准化为工具层，让 Pi agents 可以通过 tool calls 自主查询、分析、提交结构化判断。
-- **提交口径**：当前预测结果受限于公开数据源的覆盖和质量；如果后续接入更完整的历史盘口、成交明细、新闻/宏观数据、结算规则源，框架可以复用，判断质量应随数据源改善而提升。
+- **核心能力**：把多平台预测市场数据标准化为工具层，让 Pi agents 可以通过 tool calls 自主查询、分析、产出结构化判断。
+- **对外口径**：当前预测结果受限于公开数据源的覆盖和质量；如果后续接入更完整的历史盘口、成交明细、新闻/宏观数据、结算规则源，框架可以复用，判断质量应随数据源改善而提升。
 
 ---
 
-## 2. 当前实现回顾与 Drift
+## 2. 当前实现状态与历史 Drift
 
 当前 repo 已经完成：
 
 - Polymarket / Kalshi 基础数据 adapter。
 - `UnifiedEvent / UnifiedMarket / Outcome` 统一模型。
 - `screen / arbitrage / tracker` 三个分析模块。
-- 一个 TradingAgents 风格的分析师 -> 辩论 -> 估计 -> 风控顺序 pipeline。
+- legacy TradingAgents 风格的分析师 -> 辩论 -> 估计 -> 风控顺序 pipeline。
+- v2 Pi Agent graph：真实 Pi `Agent` 节点、role-specific toolsets、YES/NO debate、Debate Router、Judge、Decision Manager。
 - 示例输出和 README。
 
-但和我们想展示的架构能力相比，存在两个核心 drift：
+项目早期存在两个核心 drift；v2 MVP 已经修正了主路径，但仍有成熟度 gap：
 
-1. **没有真正基于 Pi agent runtime 做 agent**
-   - 当前主要使用 `@earendil-works/pi-ai` 的模型/provider/structured-output 能力。
+1. **早期没有真正基于 Pi agent runtime 做 agent**
+   - 早期主要使用 `@earendil-works/pi-ai` 的模型/provider/structured-output 能力。
    - `submit_estimate` / `submit_decision` 更像强制 JSON 输出，不是 agent 在分析过程中主动 tool call、接收 tool result、继续推理。
-   - 目标应改为：每个分析节点是一个真实的 `@earendil-works/pi-agent-core` `Agent`，拥有自己的 prompt、toolset、agent loop 和事件流。
+   - v2 已改为：每个分析节点是一个真实的 `@earendil-works/pi-agent-core` `Agent`，拥有自己的 prompt、toolset、agent loop 和事件流。
 
-2. **TradingAgents 被简化成了写死 workflow**
+2. **早期把 TradingAgents 简化成了写死 workflow**
    - TradingAgents 原项目基于 LangGraph：节点、工具节点、conditional edges、debate state 共同组成图。
-   - 当前 `runDebate()` 是手写 round-robin loop，缺少“agent 节点 -> tool calls -> tool node -> 回到 agent 节点”的结构。
-   - 目标应改为：实现一个轻量 TradingAgents-lite graph runner；graph 由我们写，agent loop 交给 Pi。
+   - 早期 `runDebate()` 是手写 round-robin loop，缺少“agent 节点 -> tool calls -> tool result -> 回到 agent 节点”的结构。
+   - v2 已改为：轻量 TradingAgents-lite graph runner；graph 由 Squirrel 写，agent loop 交给 Pi。
 
-这些 drift 不代表方向错误，但需要在重构中修正，避免提交时说“基于 Pi agent 框架”却只用了 Pi 的模型层。
+当前 remaining gap 不是“没用 Pi agent”，而是成熟度差距：checkpoint/resume、memory/reflection、typed state schema、更多 router target、v2-native evaluation 仍待补齐。
 
 ---
 
@@ -58,7 +57,7 @@ ARTi Dev Track 原题要求：
 
 **理由**：
 
-- Pi 轻量，适合面试题这种原型交付。
+- Pi 轻量，适合快速搭出可扩展的 agent/tool/graph 原型。
 - Pi 原生支持 tool calls、tool execution、tool result 后继续下一 turn、事件流、steer/followUp。
 - 比直接调用 `llm.text()` 更能体现 agent 能力和可扩展性。
 
@@ -75,7 +74,7 @@ ARTi Dev Track 原题要求：
 **理由**：
 
 - Pi agent-core 没有 `StateGraph.add_node/add_edge/add_conditional_edges` 这类 multi-agent graph primitive。
-- 题目只要求“参考 TradingAgents”，不需要完整复刻 LangGraph。
+- 当前项目只需要 TradingAgents-lite 能力，不需要完整复刻 LangGraph。
 - 自研 runner 可以保持 repo 小而清楚，同时解释“Pi provides agent runtime; this repo adds TradingAgents-inspired graph orchestration”。
 
 目标抽象：
@@ -104,7 +103,7 @@ interface GraphNode {
 
 **理由**：
 
-- 面试题明确点名两个 API。
+- Polymarket / Kalshi 是当前框架的核心 prediction-market 数据入口。
 - Agent 判断层应能主动查询市场、盘口、历史概率、结算规则，而不是只吃一段预拼 prompt。
 - 工具层是数据源可扩展的关键：未来接更多真实数据源时，不需要重写 agent graph。
 
@@ -189,7 +188,7 @@ flowchart TD
 
 ## 5. Toolset 设计
 
-### 5.1 必做：题目指定 API tools
+### 5.1 核心平台 API tools
 
 Polymarket：
 
@@ -263,7 +262,7 @@ Kalshi：
 - `get_fundamentals`, `get_balance_sheet`, `get_cashflow`, `get_income_statement`
   - 股票基本面工具，不适合预测市场通用框架。
 - `get_insider_transactions`
-  - 覆盖面窄，容易偏离题目。
+  - 覆盖面窄，容易偏离预测市场通用框架。
 - 股票 TA 指标原样迁移
   - 预测市场份额价格本身就是概率，直接搬 MACD/RSI 叙事容易误导。
 
@@ -384,7 +383,7 @@ interface Outcome {
 
 ## 8. Known Gaps
 
-这些 gap 是已知限制，不应在提交中隐瞒。
+这些 gap 是已知限制，不应在 README/roadmap 中隐瞒。
 
 ### 8.1 数据源覆盖 gap
 
@@ -393,7 +392,7 @@ interface Outcome {
 - 新闻、宏观、社媒、官方事件源尚未作为稳定一等数据源接入。
 - 结算规则文本有时不完整或平台间语义不一致；跨平台价差不能直接等同套利。
 
-提交口径：
+对外口径：
 
 > This repo targets the framework layer: source adapters, tool-callable market data, multi-agent reasoning, and structured decisions. Predictive quality is data-limited; with richer historical orderbook/trade data, news/macroeconomic feeds, and settlement metadata, the same framework should produce better calibrated estimates.
 
@@ -403,23 +402,27 @@ interface Outcome {
 - LLM 可能使用训练时记忆，历史 backtest 有 hindsight bias。
 - OOS 样本少，结果只能证明验证管线存在，不能证明统计显著 alpha。
 
-### 8.3 工程 gap
+### 8.3 架构成熟度 gap（相对 TradingAgents）
 
-- 当前代码尚未完成 Pi `Agent` runtime 重构。
-- 当前 agent 编排仍是顺序 workflow，需要改成 graph runner + Pi Agent nodes。
-- 简历 PDF 仍需放入 repo 根目录。
+- 当前 v2 已经使用真实 Pi `Agent` runtime 和轻量 graph runner，但还不是完整 LangGraph 级别的 graph platform。
+- 还没有 checkpoint/resume、durable decision log、post-settlement reflection memory。
+- shared state 仍偏轻量，尚未为所有节点定义强类型 state schema 和可迁移版本。
+- graph assembly 仍由 `orchestrateV2.ts` 代码显式连接；还没有从完整 declarative config 生成 graph。
+- Debate Router 已是 state-driven，但当前 target set 很窄：只在 `YES Researcher` 和 `Debate Judge` 之间决策；后续应能路由回指定 analyst、Macro/News Analyst 或 Risk Manager。
+- Backtest/OOS 仍主要验证 legacy/fixture pipeline，尚未完全复用 v2 Pi Agent graph。
 
 ---
 
-## 9. 重构计划
+## 9. MVP 状态与后续计划
 
 | 阶段 | 内容 | 验证标准 |
 |---|---|---|
-| 1. Tool layer | 新增 `src/agents/tools.ts`，把 Polymarket/Kalshi 和统一派生分析包装成 `AgentTool` | 至少一个 agent 能真实调用 source tool，并收到 tool result |
-| 2. Pi Agent node | 新增 `runPiAgentNode(role, tools, state)`，使用 `@earendil-works/pi-agent-core.Agent` | 事件流出现 `tool_execution_start/end`，报告通过 `submit_report` 进入 state |
-| 3. Graph runner | 新增轻量 node/edge/conditional runner | analyst -> debate -> decision 路径不靠手写 for-loop 主导 |
-| 4. README/PLAN 更新 | 文档改成 TradingAgents-lite on Pi，明确 known gaps | reviewer 能看出选择 Pi 的理由和边界 |
-| 5. 示例输出 | 重新捕获 `screen`、`analyze --mock`、真实 `analyze --v2 --demo-market` 输出 | 示例中展示真实 tool calls 和结构化 verdict |
+| 1. Tool layer | `src/agents/tools.ts` 把平台数据和统一派生分析包装成 `AgentTool` | 已完成；v2 使用稳定工具，网络依赖工具暂未分配 |
+| 2. Pi Agent node | `runPiAgentNode(role, tools, state)` 使用 `@earendil-works/pi-agent-core.Agent` | 已完成；真实 `--v2 --demo-market` 能跑 Pi toolcall loop |
+| 3. Graph runner | 轻量 node/edge/conditional runner | 已完成；analyst -> routed debate -> judge -> decision |
+| 4. State-driven router | Debate Router 读取 confidence/dataGaps/round state | 已完成 MVP；target set 仍待扩展 |
+| 5. Docs/examples | README/PLAN/examples 说明 TradingAgents-lite on Pi 和 known gaps | 当前更新中；后续补更多真实 run 输出 |
+| 6. TradingAgents parity | checkpoint/resume、memory/reflection、risk team、v2 backtest | 后续能力，不属于当前 MVP |
 
 ---
 
@@ -446,15 +449,15 @@ interface Outcome {
 ### 预测评估
 
 - 保留 Brier score / OOS 作为验证管线。
-- 明确统计意义有限，不作为主要交付承诺。
+- 明确统计意义有限，不作为主要项目承诺。
 
 ---
 
-## 11. 提交叙事
+## 11. 开源项目叙事
 
-提交时重点讲：
+对外重点讲：
 
-1. **题目要求的两个 API 已接入**，并统一成框架内部数据模型。
+1. **Polymarket / Kalshi 已接入**，并统一成框架内部数据模型。
 2. **分析框架不是单点脚本**：包含筛选、概率变化、跨平台异常、结算风险。
 3. **Pi 的使用是 agent-runtime 层面的**：每个角色是 Pi Agent，有自己的 toolset 和 loop。
 4. **TradingAgents 是架构参考**：我们复用其 node/tool/conditional graph 思想，但针对预测市场做轻量化。
@@ -479,4 +482,3 @@ npm run backtest -- --mock
 - `screen` 输出真实 Polymarket / Kalshi 市场。
 - `analyze` 输出 agent 过程、tool calls、最终结构化 verdict。
 - README 说明数据结构、框架设计、示例输出、known gaps。
-- repo 根目录包含个人简历。
