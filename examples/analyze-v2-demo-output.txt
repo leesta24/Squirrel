@@ -1,0 +1,118 @@
+Command:
+  npm run analyze -- --v2 --demo-market
+
+Note:
+  Abridged captured output from a real Pi Agent v2 run. The omitted sections are long
+  analyst/debate paragraphs; the important signals are the Pi tool calls, state-driven
+  debate routing, judge output, and final structured verdict.
+
+Using local demo market data...
+
+Market: "Will Bitcoin close at or above $150,000 on December 31, 2026?"
+Market-implied YES = 34.0%  [polymarket]
+(v2 mode: Pi Agent runtime, toolcall loops, role-specific toolsets)
+(demo market: local snapshot, no live exchange fetch)
+
+[Market Analyst · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_report {"summary":"This Polymarket demonstrates solid liquidity...","confidence":0.75,...}
+    tool_end submit_report OK
+
+[Market Analyst]
+    This Polymarket demonstrates solid liquidity ($145k) and moderate volume ($820k with 5.66x ratio)
+    for a long-dated Bitcoin price target. The 34% YES probability reflects market skepticism...
+    Data gaps: Specific BTC/USD reference exchange not identified; current Bitcoin spot price context
+    not provided; oracle/settlement mechanism details not fully specified.
+    Confidence: 0.75
+
+[Microstructure Analyst · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_report {"summary":"Microstructure analysis...","confidence":0.76}
+    tool_end submit_report OK
+
+[Cross-market / Resolution Analyst · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_cross_platform_anomaly_signals {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_cross_platform_anomaly_signals OK
+    tool_start submit_report {"summary":"Bitcoin $150k December 2026 Polymarket shows consistent microstructure...","confidence":0.72,...}
+    tool_end submit_report OK
+
+[YES Researcher · round 1 · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_report {"summary":"YES is underpriced relative to the implied 34%...","confidence":0.60,...}
+    tool_end submit_report OK
+
+[NO Researcher · round 1 · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_report {"summary":"NO is the favored side at the implied 34% YES / 66% NO...","confidence":0.62}
+    tool_end submit_report OK
+
+[Debate Router]
+    round=1 next=yes_researcher
+    reason=latest debate confidence is low (0.55 < 0.62)
+    signals=avg_confidence=0.55, current_price_missing, settlement_source_unclear, cross_platform_validation_missing
+
+[YES Researcher · round 2 · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_report {"summary":"YES is underpriced at 34%...","confidence":0.58,...}
+    tool_end submit_report OK
+
+[NO Researcher · round 2 · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_report {"summary":"NO is favored at the market-implied 66%...","confidence":0.60,...}
+    tool_end submit_report OK
+
+[Debate Router]
+    round=2 next=debate_judge
+    reason=maximum debate rounds reached (2/2)
+    signals=avg_confidence=0.55, current_price_missing, settlement_source_unclear,
+            volatility_distribution_missing, cross_platform_validation_missing
+
+[Debate Judge · tool]
+    tool_start submit_judgement {"winner":"UNCLEAR","reasoning":"The debate does not justify a directional edge...","dataGaps":[...]}
+    tool_end submit_judgement OK
+
+[Debate Judge]
+    WINNER: UNCLEAR
+    The debate does not justify a directional edge away from the market-implied 34% YES.
+    The YES argument was circular, while the NO argument reduced to trusting the market.
+    Both sides lacked current BTC spot price, volatility data, and a settlement reference source.
+
+[Decision Manager · tool]
+    tool_start get_verified_market_snapshot {}
+    tool_start get_probability_indicators {}
+    tool_end get_verified_market_snapshot OK
+    tool_end get_probability_indicators OK
+    tool_start submit_verdict {"side":"PASS","pHat":0.34,"action":"PASS","size":0,"reasoning":"...","dataGaps":[...]}
+    tool_end submit_verdict OK
+
+════════════════ VERDICT ════════════════
+  side:            PASS
+  p_hat:           34.0%      (our estimated true probability)
+  market_p:        34.0%      (market-implied)
+  edge:            +0.000
+  kelly_fraction:  0.0%
+  recommendation:  PASS
+  reasoning:       The judge ruled the debate UNCLEAR. No current BTC spot price, realized/implied
+                   volatility, independent probability model, or authoritative settlement reference
+                   was available, so there is no basis to deviate from market-implied probability.
+═════════════════════════════════════════

@@ -8,7 +8,7 @@ import { yesProbability } from "../data/types.js";
 import { findArbitrage } from "../analysis/arbitrage.js";
 
 const CLOB = "https://clob.polymarket.com";
-const KALSHI = "https://api.elections.kalshi.com/trade-api/v2";
+const KALSHI = "https://external-api.kalshi.com/trade-api/v2";
 
 export interface ReportSubmission {
   summary: string;

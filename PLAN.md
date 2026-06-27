@@ -391,6 +391,7 @@ interface Outcome {
 - Kalshi 历史概率数据公开能力弱于 Polymarket CLOB history；相关工具需要返回 “unavailable / partial” 而不是伪造。
 - 新闻、宏观、社媒、官方事件源尚未作为稳定一等数据源接入。
 - 结算规则文本有时不完整或平台间语义不一致；跨平台价差不能直接等同套利。
+- live source smoke 可能受当前运行环境网络、交易所 API 可达性、代理设置影响失败；这属于 source/connectivity gap，不影响 `--v2 --demo-market` 对 agent/tool/graph 能力的验证。
 
 对外口径：
 
@@ -421,7 +422,7 @@ interface Outcome {
 | 2. Pi Agent node | `runPiAgentNode(role, tools, state)` 使用 `@earendil-works/pi-agent-core.Agent` | 已完成；真实 `--v2 --demo-market` 能跑 Pi toolcall loop |
 | 3. Graph runner | 轻量 node/edge/conditional runner | 已完成；analyst -> routed debate -> judge -> decision |
 | 4. State-driven router | Debate Router 读取 confidence/dataGaps/round state | 已完成 MVP；target set 仍待扩展 |
-| 5. Docs/examples | README/PLAN/examples 说明 TradingAgents-lite on Pi 和 known gaps | 当前更新中；后续补更多真实 run 输出 |
+| 5. Docs/examples | README/PLAN/examples 说明 TradingAgents-lite on Pi 和 known gaps | 已补 v2 demo toolcall/router/verdict 示例；后续可补更多 live run 输出 |
 | 6. TradingAgents parity | checkpoint/resume、memory/reflection、risk team、v2 backtest | 后续能力，不属于当前 MVP |
 
 ---

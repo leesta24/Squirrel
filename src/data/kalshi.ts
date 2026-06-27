@@ -1,4 +1,4 @@
-// Kalshi adapter — Trade API v2 (api.elections.kalshi.com).
+// Kalshi adapter — Trade API v2 (external-api.kalshi.com).
 // Reading public data needs no key/login/signing (verified against the live API);
 // signing + the geo wall only kick in when trading/generating keys, irrelevant to read-only analysis.
 //
@@ -14,7 +14,7 @@ import { fetchJson } from "./http.js";
 import type { UnifiedEvent, UnifiedMarket, Outcome } from "./types.js";
 import { toProbability } from "./types.js";
 
-const BASE = "https://api.elections.kalshi.com/trade-api/v2";
+const BASE = "https://external-api.kalshi.com/trade-api/v2";
 
 interface RawMarket {
   ticker?: string;

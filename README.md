@@ -198,7 +198,13 @@ npm run backtest -- --mock # mock LLM
 Runs the pipeline over already-settled events (feeding only pre-settlement prices), then reports
 direction accuracy and **Brier score** vs the market-price baseline.
 
-See [`examples/`](examples/) for captured outputs.
+See [`examples/`](examples/) for captured outputs:
+
+- [`screen-output.txt`](examples/screen-output.txt) — historical live Polymarket/Kalshi screen run.
+- [`analyze-v2-demo-output.txt`](examples/analyze-v2-demo-output.txt) — real Pi Agent v2 toolcall loop,
+  state-driven debate routing, judge, and final verdict over local demo data.
+- [`backtest-output.txt`](examples/backtest-output.txt) and [`oos-output.txt`](examples/oos-output.txt) —
+  validation-pipeline examples, not alpha claims.
 
 ---
 
@@ -250,6 +256,11 @@ Platform quirks the adapters smooth over (all verified against the live APIs):
   and by missing production-grade feeds such as historical orderbook snapshots, trade-level history,
   trusted news/event feeds, macro series, and settlement-rule monitoring. Adding those sources should
   improve predictions without changing the graph architecture.
+- **Live source smoke can fail independently of framework logic.** The adapters are implemented and
+  `examples/screen-output.txt` shows a historical successful live run, but local smoke tests can fail when
+  exchange endpoints are unreachable from the runtime environment. In that case `screen` reports structured
+  warnings and v2 can still be exercised with `--demo-market`. This is treated as a source/connectivity gap,
+  not as a missing agent-orchestration capability.
 - **Known architecture maturity gaps.** Compared with a full TradingAgents-style system, this MVP does not
   yet have checkpoint/resume, durable decision logs, post-settlement reflection memory, a typed shared state
   schema for every node, dynamic graph assembly from config, or a v2-native backtest/OOS evaluator. The current
