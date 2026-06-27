@@ -16,7 +16,8 @@ import {
   noResearcherV2,
   V2_ANALYSTS,
   V2_DEBATE_PARTICIPANTS,
-  V2_DEBATE_ROUNDS,
+  V2_MAX_DEBATE_ROUNDS,
+  V2_MIN_DEBATE_ROUNDS,
 } from "./rolesV2.js";
 
 export interface OrchestrateV2Options {
@@ -26,8 +27,21 @@ export interface OrchestrateV2Options {
 
 interface V2GraphState extends AnalysisState {
   debateRound: number;
+  minDebateRounds: number;
   maxDebateRounds: number;
   debateLog: string[];
+  reportSubmissions: Record<string, ReportSubmission>;
+  routeDecisions: RouteDecision[];
+  lastRoute?: RouteDecision;
+}
+
+type RouteTarget = "yes_researcher" | "debate_judge";
+
+interface RouteDecision {
+  round: number;
+  next: RouteTarget;
+  reason: string;
+  signals: string[];
 }
 
 const pct = (n: number) => (n * 100).toFixed(1) + "%";
@@ -101,6 +115,96 @@ function winnerFromText(text: string): NonNullable<AnalysisState["debate"]>["win
   return "UNCLEAR";
 }
 
+function latestDebateReports(state: V2GraphState): ReportSubmission[] {
+  const round = state.debateRound;
+  return [
+    state.reportSubmissions[`yes_researcher_round_${round}`],
+    state.reportSubmissions[`no_researcher_round_${round}`],
+  ].filter((report): report is ReportSubmission => Boolean(report));
+}
+
+function unique(xs: string[]): string[] {
+  return [...new Set(xs.filter(Boolean))];
+}
+
+function criticalGapSignals(reports: ReportSubmission[]): string[] {
+  const gapText = reports.flatMap((report) => report.dataGaps).join(" | ").toLowerCase();
+  const checks: [string, RegExp][] = [
+    ["current_price_missing", /current.*(price|spot)|spot.*price/],
+    ["settlement_source_unclear", /settlement|reference source|resolution/],
+    ["volatility_distribution_missing", /volatility|distribution|skew/],
+    ["cross_platform_validation_missing", /cross-platform|comparable|kalshi|polymarket/],
+  ];
+  return checks.filter(([, pattern]) => pattern.test(gapText)).map(([signal]) => signal);
+}
+
+function averageConfidence(reports: ReportSubmission[]): number | undefined {
+  if (reports.length === 0) return undefined;
+  return reports.reduce((sum, report) => sum + report.confidence, 0) / reports.length;
+}
+
+function routeAfterDebate(state: V2GraphState): RouteDecision {
+  const reports = latestDebateReports(state);
+  const avgConfidence = averageConfidence(reports);
+  const criticalGaps = criticalGapSignals(reports);
+  const signals = unique([
+    avgConfidence !== undefined ? `avg_confidence=${avgConfidence.toFixed(2)}` : "avg_confidence=missing",
+    ...criticalGaps,
+  ]);
+
+  if (state.debateRound < state.minDebateRounds) {
+    return {
+      round: state.debateRound,
+      next: "yes_researcher",
+      reason: `minimum debate rounds not reached (${state.debateRound}/${state.minDebateRounds})`,
+      signals,
+    };
+  }
+
+  if (state.debateRound >= state.maxDebateRounds) {
+    return {
+      round: state.debateRound,
+      next: "debate_judge",
+      reason: `maximum debate rounds reached (${state.debateRound}/${state.maxDebateRounds})`,
+      signals,
+    };
+  }
+
+  if (avgConfidence !== undefined && avgConfidence < 0.62) {
+    return {
+      round: state.debateRound,
+      next: "yes_researcher",
+      reason: `latest debate confidence is low (${avgConfidence.toFixed(2)} < 0.62)`,
+      signals,
+    };
+  }
+
+  if (criticalGaps.length > 0) {
+    return {
+      round: state.debateRound,
+      next: "yes_researcher",
+      reason: `critical data gaps remain: ${criticalGaps.join(", ")}`,
+      signals,
+    };
+  }
+
+  return {
+    round: state.debateRound,
+    next: "debate_judge",
+    reason: "latest debate reports are confident enough and no critical gaps were flagged",
+    signals,
+  };
+}
+
+function formatRouteHistory(state: V2GraphState): string {
+  if (state.routeDecisions.length === 0) return "(none yet)";
+  return state.routeDecisions
+    .map((decision) =>
+      `Round ${decision.round}: next=${decision.next}; reason=${decision.reason}; signals=${decision.signals.join(", ") || "none"}`,
+    )
+    .join("\n");
+}
+
 function toolNamesFor(role: RoleConfig): string[] {
   switch (role.id) {
     case "market_analyst":
@@ -134,6 +238,7 @@ function makeTools(opts: {
     roleId: opts.reportKey,
     onReport: (roleId, report) => {
       opts.state.reports[roleId] = reportText(report);
+      opts.state.reportSubmissions[roleId] = report;
     },
     onJudgement: (judgement) => {
       opts.state.debate = {
@@ -194,6 +299,7 @@ function debatePrompt(state: V2GraphState, role: RoleConfig, round: number): str
     state.context,
     `Analyst reports:\n${formatAnalystReports(state)}`,
     `Debate transcript so far:\n${formatDebateTranscript(state)}`,
+    `Router notes so far:\n${formatRouteHistory(state)}`,
     `This is debate round ${round}/${state.maxDebateRounds}.`,
     role.id === "yes_researcher"
       ? "Make the strongest evidence-based YES case. Address the NO side's prior claims when present."
@@ -234,6 +340,7 @@ function buildGraph(opts: {
   if (!firstAnalyst) throw new Error("v2 graph has no analyst start node");
   const firstDebater = V2_DEBATE_PARTICIPANTS[0];
   const secondDebater = V2_DEBATE_PARTICIPANTS[1];
+  const debateRouterId = "debate_router";
 
   const analystNodes: GraphNode<V2GraphState>[] = V2_ANALYSTS.map((role) => ({
     id: role.id,
@@ -281,6 +388,19 @@ function buildGraph(opts: {
       }
     },
   });
+
+  const routerNode: GraphNode<V2GraphState> = {
+    id: debateRouterId,
+    async run({ state }) {
+      const decision = routeAfterDebate(state);
+      state.lastRoute = decision;
+      state.routeDecisions.push(decision);
+      opts.onProgress?.(
+        "Debate Router",
+        `round=${decision.round} next=${decision.next}\nreason=${decision.reason}\nsignals=${decision.signals.join(", ") || "none"}`,
+      );
+    },
+  };
 
   const judgeNode: GraphNode<V2GraphState> = {
     id: debateJudgeV2.id,
@@ -339,16 +459,17 @@ function buildGraph(opts: {
     edges[role.id] = V2_ANALYSTS[i + 1]?.id ?? firstDebater.id;
   }
   edges[firstDebater.id] = secondDebater.id;
-  edges[secondDebater.id] = ({ state }: { state: V2GraphState }) =>
-    state.debateRound < state.maxDebateRounds ? firstDebater.id : debateJudgeV2.id;
+  edges[secondDebater.id] = debateRouterId;
+  edges[debateRouterId] = ({ state }: { state: V2GraphState }) =>
+    state.lastRoute?.next ?? debateJudgeV2.id;
   edges[debateJudgeV2.id] = decisionManagerV2.id;
   edges[decisionManagerV2.id] = undefined;
 
   return {
     start: firstAnalyst.id,
-    nodes: [...analystNodes, debateNode(firstDebater), debateNode(secondDebater), judgeNode, decisionNode],
+    nodes: [...analystNodes, debateNode(firstDebater), debateNode(secondDebater), routerNode, judgeNode, decisionNode],
     edges,
-    maxSteps: V2_ANALYSTS.length + V2_DEBATE_ROUNDS * V2_DEBATE_PARTICIPANTS.length + 2,
+    maxSteps: V2_ANALYSTS.length + V2_MAX_DEBATE_ROUNDS * (V2_DEBATE_PARTICIPANTS.length + 1) + 2,
   };
 }
 
@@ -360,8 +481,11 @@ export async function analyzeV2(market: UnifiedMarket, opts: OrchestrateV2Option
     context: formatContext(market, marketP),
     reports: {},
     debateRound: 0,
-    maxDebateRounds: V2_DEBATE_ROUNDS,
+    minDebateRounds: V2_MIN_DEBATE_ROUNDS,
+    maxDebateRounds: V2_MAX_DEBATE_ROUNDS,
     debateLog: [],
+    reportSubmissions: {},
+    routeDecisions: [],
   };
 
   await runGraph(

@@ -40,8 +40,9 @@ flowchart TD
     MA[Market Analyst] --> MI[Microstructure Analyst] --> XA[Cross-market / Resolution Analyst]
     XA --> YES[YES Researcher]
     YES --> NO[NO Researcher]
-    NO -->|round < max| YES
-    NO -->|rounds done| J[Debate Judge]
+    NO --> R[Debate Router]
+    R -->|low confidence / critical gaps| YES
+    R -->|enough evidence / max rounds| J[Debate Judge]
     J --> DM[Decision Manager] --> V[Structured verdict]
   end
   D --> A --> T --> G
@@ -57,7 +58,7 @@ Four layers, decoupled:
 - **Tool layer** (`src/agents/tools.ts`) — wraps Polymarket, Kalshi, normalized snapshots, indicators,
   cross-platform anomaly signals, and structured output tools as Pi `AgentTool`s.
 - **Agent graph** (`src/agents/orchestrateV2.ts`) — a TradingAgents-inspired graph of real
-  `@earendil-works/pi-agent-core` `Agent` nodes: analysts → multi-round YES/NO debate → judge →
+  `@earendil-works/pi-agent-core` `Agent` nodes: analysts → routed YES/NO debate → judge →
   decision manager.
 
 ### Pi SDK layering
@@ -70,6 +71,20 @@ Pi is used at two layers:
 
 Pi does not provide a LangGraph-style multi-agent `StateGraph`, so Squirrel adds a small graph runner
 (`src/agents/graphRunner.ts`). In short: **Pi runs each agent; Squirrel orchestrates the agents.**
+
+### State-driven routing
+
+V2 includes a deterministic **Debate Router**. After each YES/NO pair, it reads structured state rather than
+blindly advancing a fixed workflow:
+
+- continue debate until `minDebateRounds` is reached;
+- stop at `maxDebateRounds`;
+- between those bounds, continue only when latest reports show low confidence or critical gaps such as
+  missing current price, settlement source, volatility parameters, or cross-platform validation;
+- otherwise route to Debate Judge.
+
+This is intentionally not an LLM router in the MVP. The router is transparent and reproducible; future targets
+can include returning to a data analyst, adding a Macro Analyst, or entering a Risk Manager.
 
 ### Agent roles: TradingAgents → prediction markets
 
@@ -159,7 +174,7 @@ candidate. Streams each role's output, then prints a structured verdict:
 `side · p_hat · market_p · edge · kelly_fraction · recommendation · reasoning`.
 
 `--v2` is the intended architecture path: each role is a real Pi `Agent` with a role-specific toolset,
-and the graph runs analysts → two YES/NO debate rounds → debate judge → decision manager. `--demo-market`
+and the graph runs analysts → router-controlled YES/NO debate → debate judge → decision manager. `--demo-market`
 uses a local market snapshot so the real Pi Agent loop can be exercised even when live exchange APIs are
 unreachable. `--mock` does not exercise the Pi Agent toolcall loop and is therefore kept on the legacy path only.
 

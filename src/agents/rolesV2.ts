@@ -81,7 +81,8 @@ export const V2_DEBATE_PARTICIPANTS: [RoleConfig, RoleConfig] = [
   noResearcherV2,
 ];
 
-export const V2_DEBATE_ROUNDS = 2;
+export const V2_MIN_DEBATE_ROUNDS = 1;
+export const V2_MAX_DEBATE_ROUNDS = 2;
 
 export const V2_ROLES: RoleConfig[] = [
   ...V2_ANALYSTS,

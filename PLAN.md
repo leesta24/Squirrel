@@ -157,6 +157,7 @@ flowchart TD
     XA[Cross-market / Resolution Analyst · Pi Agent]
     YES[YES Researcher · Pi Agent]
     NO[NO Researcher · Pi Agent]
+    R[Debate Router · deterministic]
     J[Debate Judge · Pi Agent]
     DM[Decision Manager · Pi Agent]
   end
@@ -172,15 +173,17 @@ flowchart TD
   T --> J
   T --> DM
   MA --> MI --> XA --> YES --> NO
-  NO -->|round < max| YES
-  NO -->|round done| J --> DM
+  NO --> R
+  R -->|low confidence / critical gaps| YES
+  R -->|enough evidence / max rounds| J --> DM
 ```
 
-三层职责：
+职责：
 
 - **Data adapters**：只负责真实 API 接入和平台字段归一化。
 - **Tool layer**：把原始平台 API 和派生分析能力包装为 Pi `AgentTool`。
 - **TradingAgents-lite graph**：负责编排多个 Pi agents、条件流转、共享状态和最终 verdict。
+- **Debate Router**：读取结构化 report state，而不是只按固定 round 计数推进。
 
 ---
 
@@ -267,6 +270,23 @@ Kalshi：
 ### 5.5 Role -> toolset
 
 当前 v2 active toolset 先只打开确定可用、无额外交易所网络依赖的工具；source/search/orderbook/history tools 保留实现和计划，但不分配给 v2 agent，等 live API 连通性稳定后再打开。
+
+### 5.6 State-driven routing MVP
+
+Router 是 deterministic 的，不调用 LLM。它在每个 NO Researcher 之后运行，目标是决定下一节点：
+
+```text
+if debateRound < minDebateRounds:
+  next = YES Researcher
+else if debateRound >= maxDebateRounds:
+  next = Debate Judge
+else if latest YES/NO reports show low confidence or critical data gaps:
+  next = YES Researcher
+else:
+  next = Debate Judge
+```
+
+MVP 只在 `YES Researcher` 和 `Debate Judge` 之间路由。后续可以扩展到 `Market Analyst`、`Macro Analyst`、`Resolution Analyst`、`Risk Manager` 等补充节点。
 
 | Role | Toolset |
 |---|---|
